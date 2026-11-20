@@ -344,11 +344,25 @@ const TTS = {
   init() { if (!this.api) return; const pick = () => { const vs = speechSynthesis.getVoices(); this.total = vs.length;
     this.voice = vs.find(v => /^kk/i.test(v.lang)) || vs.find(v => /kazakh|қазақ/i.test(v.name)) || null; }; pick(); speechSynthesis.onvoiceschanged = pick; },
   sayable(t) { return String(t).replace(/\u00a0/g, '').replace(/:/g, ' бөлу ').replace(/×/g, ' көбейту ').replace(/−/g, ' азайту ').replace(/=/g, ' тең ').replace(/\?/g, ''); },
-  speak(text) {
+  speak(text, onStatus) {
     if (!this.api) return 'Бұл браузерде дыбыстау функциясы жоқ.';
     if (!this.voice) { const vs = speechSynthesis.getVoices(); this.voice = vs.find(v => /^kk/i.test(v.lang)) || vs.find(v => /kazakh|қазақ/i.test(v.name)) || null; }
     if (!this.voice) return 'Бұл құрылғыда қазақ тілді дауыс табылмады, сондықтан мәтін дыбысталмайды. Басқа тілдегі дауысты қазақша дыбыстау ретінде ұсынбаймыз. Қазақ дауысы бар браузерді (мысалы, интернетке қосылған Microsoft Edge) қолданыңыз немесе мұғалім оқып берсін.';
-    speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(this.sayable(text)); u.voice = this.voice; u.lang = this.voice.lang; u.rate = 0.85; speechSynthesis.speak(u); return '';
+    // Chromium/Edge: cancel() мен speak() бірден қатар шақырылса, сөйлеу кейде үнсіз жоғалады — сондықтан аз кідіріс.
+    // Utterance жаһандық айнымалыда сақталады, әйтпесе браузер оны ортасында тоқтатып тастауы мүмкін.
+    const say = () => {
+      const u = new SpeechSynthesisUtterance(this.sayable(text)); this.cur = u; let started = false;
+      u.voice = this.voice; u.lang = this.voice.lang; u.rate = 0.9;
+      u.onstart = () => { started = true; onStatus && onStatus('playing'); };
+      u.onend = () => { if (this.cur === u) onStatus && onStatus('end'); };
+      u.onerror = e => { if (e.error === 'interrupted' || e.error === 'canceled') return; onStatus && onStatus('error', e.error); };
+      if (speechSynthesis.paused) speechSynthesis.resume();
+      speechSynthesis.speak(u);
+      setTimeout(() => { if (!started && this.cur === u) onStatus && onStatus('nostart'); }, 5000);
+    };
+    if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(say, 200); } else say();
+    onStatus && onStatus('wait');
+    return '';
   },
   status() { if (!this.api) return { ok: false, text: 'Браузерде дыбыстау API жоқ' }; return this.voice ? { ok: true, text: `Қазақ дауысы бар: ${this.voice.name}` } : { ok: false, text: 'Осы браузерде қазақ дауысы табылмады — оқушыға шынайы ескерту көрсетіледі. Microsoft Edge-ті интернетпен ашып көріңіз.' }; }
 };
@@ -832,7 +846,14 @@ function bindTask() {
   const setScale = v => { R.scale = Math.max(0.8, Math.min(2.2, Math.round(v * 100) / 100)); $('.taskbox').style.setProperty('--scale', R.scale); };
   $('#aPlus').onclick = () => setScale(R.scale + 0.15);
   $('#aMinus').onclick = () => setScale(R.scale - 0.15);
-  $('#speak') && ($('#speak').onclick = () => { const txt = [it.instruction, it.explain, ...it.hints.slice(0, P.hints), it.question].filter(Boolean).join('. '); const err = TTS.speak(txt); $('#ttsMsg').innerHTML = err ? `<div class="note w small">${esc(err)}</div>` : ''; });
+  $('#speak') && ($('#speak').onclick = () => { const txt = [it.instruction, it.explain, ...it.hints.slice(0, P.hints), it.question].filter(Boolean).map(x => String(x).replace(/[.!?\s]+$/, '')).join('. ') + '.'; const box = $('#ttsMsg');
+    const err = TTS.speak(txt, (st, code) => { if (!document.body.contains(box)) return;
+      box.innerHTML = st === 'wait' ? '<div class="note small">Дауыс қосылып жатыр…</div>'
+        : st === 'playing' ? `<div class="note g small">🔊 Оқылып жатыр (${esc(TTS.voice.name)})</div>`
+        : st === 'end' ? ''
+        : st === 'error' ? `<div class="note w small">Дыбыстау кезінде қате шықты (${esc(code || 'белгісіз')}). Интернетті тексеріп, батырманы қайта басыңыз.</div>`
+        : '<div class="note w small">Дыбыс басталмады. Тексеріңіз: компьютердің және Edge қойындысының дыбысы қосулы ма, интернет бар ма. Содан кейін батырманы қайта басыңыз.</div>'; });
+    if (err) box.innerHTML = `<div class="note w small">${esc(err)}</div>`; });
   $('#nextHint') && ($('#nextHint').onclick = () => { if (P.hints < it.hints.length) { P.hints++; const i = P.hints - 1;
     $('#hints').insertAdjacentHTML('beforeend', `<div class="hint"><small>${i + 1}-қадам</small>${esc(it.hints[i])}</div>`);
     const b = $('#nextHint'); b.innerHTML = icon('bulb') + 'Келесі қадам'; if (P.hints >= it.hints.length) b.disabled = true; } });
