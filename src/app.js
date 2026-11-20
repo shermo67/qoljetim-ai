@@ -379,6 +379,7 @@ function render() {
   const p = location.hash.slice(1) || '/';
   window.scrollTo(0, 0);
   if (TTS.api) speechSynthesis.cancel();
+  if (window.__qjAudio) { window.__qjAudio.pause(); window.__qjAudio = null; }
   const app = $('#app');
   if (p === '/') return app.innerHTML = viewLanding();
   if (p.startsWith('/t')) { const sec = p.split('/')[2] || 'dash'; app.innerHTML = teacherShell(sec, teacherView(sec)); bindTeacher(sec); return; }
@@ -568,7 +569,7 @@ function tAdapt() {
     <div class="row" style="margin-bottom:12px"><label class="f" for="stuSel" style="margin:0">Оқушы:</label><select class="inp" id="stuSel" style="max-width:280px">${st.map(s => `<option value="${s.id}" ${s.id === d.studentId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
     <div class="chips">${SUPPORTS.map(([k, t]) => `<label class="chip ${S[k] ? 'on' : ''}"><input type="checkbox" data-sup="${k}" ${S[k] ? 'checked' : ''}>${t}</label>`).join('')}</div>
     ${d.needReapprove ? '<div class="note w mt small">Қадамдық көмек жаңартылды: енді ол дайын жауапты ашпайды. Тапсырманы қарап шығып, қайта <b>бекітіп</b>, оқушыға қайта жіберіңіз.</div>' : ''}
-    ${S.tts ? `<div class="note ${tts.ok ? 'g' : 'w'} mt small">${icon('speaker', 'width="16" height="16"')} ${esc(tts.text)}</div>` : ''}
+    ${S.tts ? (items.length && items.every(i => (window.QJ_AUDIO || {})[i.id]) ? `<div class="note g mt small">${icon('speaker', 'width="16" height="16"')} Барлық тапсырмаға жазылған қазақша дауыс бар, ол интернетсіз ойнатылады.</div>` : `<div class="note ${tts.ok ? 'g' : 'w'} mt small">${icon('speaker', 'width="16" height="16"')} ${esc(tts.text)}</div>`) : ''}
     <div class="note w mt small">${icon('bulb', 'width="16" height="16"')} Бейімдеу <b>ережеге негізделген демо-механизм</b> арқылы жасалады (тілдік модель емес). Оқу мақсаты өзгермейді — тек тапсырманың берілу және орындалу тәсілі өзгереді. Кез келген мәтінді мұғалім өзгерте алады.</div>
   </section>
   <section class="card"><div class="row"><h2 style="margin:0">Алдын ала қарау</h2><span class="spacer"></span>
@@ -796,6 +797,8 @@ function startRun(asg, sid) {
     per: asg.items.map(() => ({ attempts: 0, hints: 0, correct: false, firstTry: false, visual: false, solved: false })) };
 }
 function renderTask() {
+  if (window.__qjAudio) { window.__qjAudio.pause(); window.__qjAudio = null; }
+  if (TTS.api) speechSynthesis.cancel();
   const R = state.run, asg = R.asg, it = asg.items[R.idx], P = R.per[R.idx], S = asg.supports, n = asg.items.length;
   const app = $('#app');
   app.innerHTML = studentShell(`
@@ -847,6 +850,17 @@ function bindTask() {
   $('#aPlus').onclick = () => setScale(R.scale + 0.15);
   $('#aMinus').onclick = () => setScale(R.scale - 0.15);
   $('#speak') && ($('#speak').onclick = () => { const txt = [it.instruction, it.explain, ...it.hints.slice(0, P.hints), it.question].filter(Boolean).map(x => String(x).replace(/[.!?\s]+$/, '')).join('. ') + '.'; const box = $('#ttsMsg');
+    const rec = (window.QJ_AUDIO || {})[it.id];
+    if (rec) {
+      if (TTS.api) speechSynthesis.cancel();
+      if (window.__qjAudio) window.__qjAudio.pause();
+      const au = new Audio(rec); window.__qjAudio = au;
+      au.onplaying = () => { box.innerHTML = '<div class="note g small">🔊 Жазылған дауыс ойнатылып жатыр (интернетсіз)</div>'; };
+      au.onended = () => { box.innerHTML = ''; };
+      au.onerror = () => { box.innerHTML = '<div class="note w small">Жазылған дауысты ойнату мүмкін болмады. Компьютердің дыбысын тексеріңіз.</div>'; };
+      au.play().catch(() => { box.innerHTML = '<div class="note w small">Жазылған дауысты ойнату мүмкін болмады. Батырманы қайта басыңыз.</div>'; });
+      return;
+    }
     const err = TTS.speak(txt, (st, code) => { if (!document.body.contains(box)) return;
       box.innerHTML = st === 'wait' ? '<div class="note small">Дауыс қосылып жатыр…</div>'
         : st === 'playing' ? `<div class="note g small">🔊 Оқылып жатыр (${esc(TTS.voice.name)})</div>`
