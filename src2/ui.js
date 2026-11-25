@@ -3,7 +3,7 @@
    ===================================================================== */
 // Google Forms сілтемесі берілгенде осында жазылады. Бос болса, «Пікір қалдыру» батырмасы көрсетілмейді.
 const FEEDBACK_URL = window.QJ_FEEDBACK_URL || '';
-const APP_VER = '2.0';
+const APP_VER = '2.1';
 
 /* =====================================================================
    Ортақ көмекшілер
@@ -13,26 +13,46 @@ const students = () => { let s = Store.get('students', null); if (!s) { s = [{ i
 const studentName = id => id === 'link' ? 'Оқушы (сілтеме арқылы)' : id === 'preview' ? 'Алдын ала қарау' : (students().find(s => s.id === id) || { name: 'Оқушы' }).name;
 const getLesson = () => migrateLesson(Store.get('lesson', null));
 
-const RULES_VER = 3;
+const RULES_VER = 4;
 function getDraft() {
   const d0 = Store.get('draft', null);
   if (d0 && d0.rulesVer !== RULES_VER) { d0.rulesVer = RULES_VER; if (d0.approved) { d0.approved = false; d0.approvedAt = 0; d0.needReapprove = true; } Store.set('draft', d0); }
   return d0 || { supports: {}, custom: {}, criterion: '', method: '', studentId: 's1', approved: false, approvedAt: 0, stageIdx: null, rulesVer: RULES_VER };
 }
 function saveDraft(d, keepApproval = false) { if (!keepApproval) { d.approved = false; d.approvedAt = 0; } d.rulesVer = RULES_VER; Store.set('draft', d); }
-function draftItems(L, d) {
-  const S = d.supports || {};
-  return (L?.tasks || []).filter(t => t.selected && !validateTask(t)).map(t => {
-    const base = adaptTask(t, S); const c = (d.custom || {})[base.id] || {};
+
+/* --- Жазылған дауыстар ---
+   1) Кірістірілген демо-жазбалар (математика, 3 тапсырма): адам дауысымен «Қысқа нұсқаулық» + «Қарапайым тіл» мәтіні оқылған.
+      Сондықтан олар тек осы екі қолдау таңдалып, мәтін өзгертілмегенде ғана қолданылады.
+   2) Мұғалім осы құрылғыда өзі жазған дауыс: жазу кезіндегі мәтін қазіргі мәтінмен сәйкес келсе ғана ойнатылады. */
+const localRecs = () => Store.get('recs', {});
+function recKindFor(it, S, c) {
+  const lr = localRecs()[it.id]; if (lr && lr.text === speechCore(it)) return 'local';
+  const em = (window.QJ_AUDIO || {})[it.id];
+  if (em && S.short && S.simple && !(c && (c.instruction != null || c.explain != null || c.question != null))) return 'embed';
+  return '';
+}
+function itemsFromTasks(tasks, S, custom) {
+  return (tasks || []).filter(t => t.selected !== false && !validateTask(t)).map(t => {
+    const base = adaptTask(t, S); const c = (custom || {})[base.id] || {};
     const it = { ...base };
     ['instruction', 'question', 'explain', 'hints'].forEach(k => { if (c[k] != null) it[k] = c[k]; });
     if (c.visualText != null && S.visual) it.visual = c.visualText ? { kind: 'text', text: c.visualText } : null;
-    it.edited = !!Object.keys(c).length;
+    it.edited = !!Object.keys(c).length; it.recKind = recKindFor(it, S, c);
     return it;
   });
 }
+function draftItems(L, d) { return itemsFromTasks((L?.tasks || []).filter(t => t.selected), d.supports || {}, d.custom); }
+function draftTasks(L) { return (L?.tasks || []).filter(t => t.selected && !validateTask(t)); }
 const draftCriterion = d => d.criterion || CRITERION_DEFAULT;
 const draftMethod = d => d.method || methodText(d.supports || {});
+/* Ойнатуға болатын жазба (оқушы жағында, ойнату сәтінде тексеріледі) */
+function playableRec(it, S) {
+  const lr = localRecs()[it.id]; if (lr && lr.text === speechCore(it)) return lr.data;
+  const em = (window.QJ_AUDIO || {})[it.id];
+  if (em && (it.recKind === 'embed' || (it.recKind == null && S.short && S.simple))) return em;
+  return null;
+}
 
 /* Сілтеме арқылы беру: деректер сығылып, сілтеменің ішіне жазылады (сервер жоқ) */
 async function packData(obj) {
@@ -106,8 +126,7 @@ document.addEventListener('click', e => { const g = e.target.closest('[data-go]'
 
 async function render() {
   const p = location.hash.slice(1) || '/';
-  if (TTS.api) speechSynthesis.cancel();
-  if (window.__qjAudio) { window.__qjAudio.pause(); window.__qjAudio = null; }
+  stopSpeech(); closeDlg();
   const app = $('#app');
   document.body.classList.toggle('hc', p.startsWith('/s') && !!Store.get('contrast', false));
   try {
@@ -177,7 +196,7 @@ function bindLanding() { $('#tryBtn').onclick = startTour; }
 /* =====================================================================
    МҰҒАЛІМ КАБИНЕТІ
    ===================================================================== */
-const T_NAV = [['dash', 'Басты бет', 'home'], ['upload', 'Сабақ және ҚМЖ', 'upload'], ['adapt', 'Тапсырманы бейімдеу', 'wand'], ['students', 'Оқушылар', 'users'], ['results', 'Нәтижелер', 'chart']];
+const T_NAV = [['dash', 'Басты бет', 'home'], ['upload', 'Сабақ және ҚМЖ', 'upload'], ['adapt', 'Тапсырманы бейімдеу', 'wand'], ['compare', 'Салыстыру', 'eye'], ['students', 'Оқушылар', 'users'], ['results', 'Нәтижелер', 'chart']];
 function teacherShell(sec, body) {
   return `<header class="top"><div class="wrap">
     <button class="logo" data-go="/" aria-label="Басты бетке"><span class="logo-mark">QJ</span>QolJetim AI</button>
@@ -188,8 +207,8 @@ function teacherShell(sec, body) {
     <button class="btn ghost sm" data-go="/">${icon('out')}Шығу</button>
   </div></header><main class="wrap" id="tmain">${body}</main>`;
 }
-function teacherView(sec) { return ({ dash: tDash, upload: tUpload, adapt: tAdapt, students: tStudents, results: tResults }[sec] || tDash)(); }
-function bindTeacher(sec) { ({ upload: bindUpload, adapt: bindAdapt, students: bindStudents, results: bindResults, dash: bindDash }[sec] || (() => { }))(); }
+function teacherView(sec) { return ({ dash: tDash, upload: tUpload, adapt: tAdapt, compare: tCompare, students: tStudents, results: tResults }[sec] || tDash)(); }
+function bindTeacher(sec) { ({ upload: bindUpload, adapt: bindAdapt, compare: bindCompare, students: bindStudents, results: bindResults, dash: bindDash }[sec] || (() => { }))(); }
 
 function flowStatus() {
   const L = getLesson(), d = getDraft(), as = Store.get('assignments', {}), res = Store.get('results', []);
@@ -385,48 +404,55 @@ function saveLesson() {
 }
 
 /* ---------------- Тапсырманы бейімдеу ---------------- */
+let recCtl = null; // мұғалімнің дауыс жазуы
 function tAdapt() {
   const L = getLesson();
   if (!L) return `<h1>Тапсырманы бейімдеу</h1><section class="card"><p>Алдымен сабақты таңдаңыз немесе ҚМЖ жүктеңіз.</p><button class="btn" data-go="/t/upload">${icon('upload')}Сабақ таңдау</button></section>`;
-  const d = getDraft(); const S = d.supports || {}; const items = draftItems(L, d); const st = students();
-  const as = Store.get('assignments', {})[d.studentId]; const ed = state.editMode; const tts = TTS.status();
+  const d = getDraft(); const S = d.supports || {}; const items = draftItems(L, d); const st = students(); const ed = state.editMode; const tts = TTS.status();
   if (!items.length) return `<h1>Тапсырманы бейімдеу</h1><section class="card"><p>Оқушыға берілетін тапсырма таңдалмаған.</p><button class="btn" data-go="/t/upload">${icon('edit')}Тапсырмаларды белгілеу</button></section>`;
   const hasChoice = items.some(i => i.type === 'choice' || i.type === 'match');
-  const allRec = items.every(i => (window.QJ_AUDIO || {})[i.id]);
+  const nRec = items.filter(i => i.recKind).length;
   return `<h1>Тапсырманы бейімдеу</h1>
   <p class="muted">${esc(L.subject || '')}${L.grade ? ' · ' + esc(L.grade) + '-сынып' : ''} · <b>${esc(L.topic)}</b> · ${items.length} тапсырма <button class="linkbtn" data-go="/t/upload">өзгерту</button></p>
-  <section class="card"><h2>Оқушыға қандай қолдау қажет?</h2>
+  <section class="card"><h2>1. Оқушыға қандай қолдау қажет?</h2>
     <p class="muted small">Мұғалім педагогикалық қажеттілікті таңдайды. Жүйе диагноз қоймайды. Бір қиындығы бар балалардың бәріне бірдей бейімдеу сәйкес келе бермейді, сондықтан қолдау әр оқушыға жеке таңдалады.</p>
     <div class="row" style="margin-bottom:12px"><label class="f" for="stuSel" style="margin:0">Оқушы:</label><select class="inp" id="stuSel" style="max-width:280px">${st.map(s => `<option value="${s.id}" ${s.id === d.studentId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
     <div class="chips">${SUPPORTS.map(([k, t]) => `<label class="chip ${S[k] ? 'on' : ''}"><input type="checkbox" data-sup="${k}" ${S[k] ? 'checked' : ''}>${t}${k === 'fewer' && !hasChoice ? ' <small class="muted">(таңдау мен сәйкестендіруге)</small>' : ''}</label>`).join('')}</div>
     ${d.needReapprove ? '<div class="note w mt small">Платформа жаңартылды. Тапсырманы қарап шығып, қайта <b>бекітіңіз</b>.</div>' : ''}
-    ${S.tts ? (allRec ? `<div class="note g mt small">${icon('speaker', 'width="16" height="16"')} Барлық тапсырмаға жазылған қазақша дауыс бар, ол интернетсіз ойнатылады.</div>` : `<div class="note ${tts.ok ? 'g' : 'w'} mt small">${icon('speaker', 'width="16" height="16"')} ${esc(tts.text)}</div>`) : ''}
+    ${S.tts ? `<div class="note ${nRec === items.length || tts.ok ? 'g' : 'w'} mt small">${icon('speaker', 'width="16" height="16"')} Жазылған дауыс: ${nRec}/${items.length} тапсырмада (интернетсіз ойнатылады). ${nRec < items.length ? (tts.ok ? `Қалғаны браузер дауысымен оқылады: ${esc(TTS.voice.name)}.` : 'Қалғаны үшін осы браузерде қазақ дауысы жоқ: оқушыға шынайы ескерту көрсетіледі. Төменде әр тапсырмаға өз дауысыңызды жаза аласыз («Дауыс жазу») немесе Microsoft Edge-ті интернетпен қолданыңыз.') : ''}</div>` : ''}
     <div class="note mt small">${icon('bulb', 'width="16" height="16"')} Бейімдеу <b>ережеге негізделген алгоритм</b> арқылы ұсынылады (тілдік модель емес). Оқу мақсаты өзгермейді, тек тапсырманың берілу және орындалу тәсілі өзгереді. Кез келген мәтінді мұғалім өзгерте алады.</div>
   </section>
-  <section class="card"><div class="row"><h2 style="margin:0">Бастапқы және бейімделген тапсырма</h2><span class="spacer"></span>
-    <button class="btn ghost sm" id="previewBtn">${icon('eye')}Оқушы көрінісі</button>
+  ${actionCard(L, d, 'top')}
+  <section class="card"><div class="row"><h2 style="margin:0">2. Бастапқы және бейімделген тапсырма</h2><span class="spacer"></span>
+    <button class="btn ghost sm" data-go="/t/compare">${icon('eye')}Салыстыру</button>
+    <button class="btn ghost sm" id="previewBtn">${icon('student')}Оқушы көрінісі</button>
     <button class="btn ${ed ? '' : 'ghost'} sm" id="editBtn">${icon('edit')}${ed ? 'Өңдеуді сақтау' : 'Өңдеу'}</button></div>
     ${items.map((it, i) => adaptCompare(it, i, S, ed)).join('')}
     ${ed ? `<label class="f">Орындау тәсілі</label><textarea class="inp" id="edMethod">${esc(draftMethod(d))}</textarea><label class="f">Бағалау критерийі</label><textarea class="inp" id="edCrit">${esc(draftCriterion(d))}</textarea>
-      <div class="row mt"><button class="btn ghost sm" id="resetEdits">Бастапқы ұсынысқа қайтару</button></div>` : ''}
-    <div class="row mt2">
-      <button class="btn blue" id="approveBtn" ${d.approved ? 'disabled' : ''}>${icon('check')}${d.approved ? 'Бекітілді' : 'Бекіту'}</button>
-      <span class="small ${d.approved ? '' : 'muted'}">${d.approved ? `✓ Мұғалім бекітті: ${nowStr(d.approvedAt)}` : 'Жіберу үшін алдымен бекітіңіз'}</span>
-    </div>
+      <div class="row mt"><button class="btn ghost sm" id="resetEdits">Бастапқы ұсынысқа қайтару</button><button class="btn" id="editBtn2">${icon('check')}Өңдеуді сақтау</button></div>` : ''}
   </section>
-  <section class="card ${d.approved ? '' : 'dim'}" id="sendCard"><h2>Оқушыға жіберу</h2>
-    <div class="grid2">
-      <div class="sendopt"><h3>${icon('student')} Осы құрылғыда</h3><p class="small muted">Оқушы кабинеті осы браузерде ашылады. Демонстрацияға ыңғайлы.</p><button class="btn" id="sendBtn" ${d.approved ? '' : 'disabled'}>${icon('send')}Осы құрылғыда жіберу</button>
-        ${as ? `<p class="small mt">✓ «${esc(studentName(d.studentId))}» оқушысына жіберілді: ${nowStr(as.sentAt)}${as.version !== d.approvedAt ? ' <b>(кейін өзгерістер болды, қайта жіберіңіз)</b>' : ''} · <button class="linkbtn" data-go="/s">Оқушы кабинетіне өту</button></p>` : ''}</div>
-      <div class="sendopt"><h3>${icon('send')} Сілтеме арқылы (басқа құрылғыға)</h3><p class="small muted">Тапсырма сілтеменің ішіне жазылады, сервер қолданылмайды. Оқушы нәтижені сізге сілтеме арқылы қайтарады.</p><button class="btn blue" id="linkBtn" ${d.approved ? '' : 'disabled'}>${icon('send')}Сілтеме жасау</button><div id="linkOut"></div></div>
-    </div>
-  </section>
-  <section class="card" id="planCard"><div class="row"><h2 style="margin:0">Ортақ ҚМЖ ішіндегі көрінісі</h2><span class="spacer"></span>
+  ${actionCard(L, d, 'bottom')}
+  <section class="card" id="planCard"><div class="row"><h2 style="margin:0">Ортақ ҚМЖ</h2><span class="spacer"></span>
     <button class="btn ghost sm" id="printBtn">${icon('file')}Басып шығару</button>
     <button class="btn ghost sm" id="wordBtn">${icon('down')}Word жүктеу</button></div>
-    <p class="muted small">Бөлек жоспар жасалмайды: бейімделген тапсырма ортақ жоспардың тиісті кезеңіне кіріктіріледі. ${L.docxB64 ? 'Word файлында бастапқы құжат сақталып, тек осы блок қосылады.' : 'Word файлы осы сабақ жоспарынан жасалады.'}</p>
-    ${planView(L, d, items)}
+    <div class="seg mt" role="tablist" aria-label="ҚМЖ көрінісі">${[['orig', 'Бастапқы ҚМЖ'], ['adapted', 'Бейімделген ҚМЖ'], ['diff', 'Салыстыру']].map(([k, t]) => `<button role="tab" aria-selected="${(state.planMode || 'adapted') === k}" class="${(state.planMode || 'adapted') === k ? 'on' : ''}" data-pm="${k}">${t}</button>`).join('')}</div>
+    <p class="muted small">Бөлек жоспар жасалмайды: бейімделген тапсырма ортақ жоспардың тиісті кезеңіне кіріктіріледі. ${L.docxB64 ? 'Мұнда құжаттың мәтіндік көрінісі берілген. Word файлында бастапқы құжаттың пішімі сақталып, тек ЕББҚ блогы қосылады.' : 'Word файлы осы сабақ жоспарынан жасалады.'}</p>
+    ${planView(L, d, items, state.planMode || 'adapted')}
   </section>`;
+}
+function actionCard(L, d, pos) {
+  return `<section class="card actcard ${d.approved ? 'ok' : ''}" ${pos === 'top' ? 'id="actTop"' : ''}>
+    <div class="row">
+      <div class="act-st">${d.approved ? `<b>✓ Мұғалім бекітті</b><span class="small muted">${nowStr(d.approvedAt)} · Тапсырма ортақ ҚМЖ-ға кіріктірілді</span>` : `<b>Бекітілмеген</b><span class="small muted">Тапсырмаларды тексеріп, бекітіңіз. Содан кейін оқушыға жіберуге болады.</span>`}</div>
+      <span class="spacer"></span>
+      ${d.approved ? '' : `<button class="btn blue lg" data-approve>${icon('check')}Бекіту</button>`}
+      <button class="btn lg" data-send ${d.approved ? '' : 'disabled'}>${icon('send')}Оқушыға жіберу</button>
+    </div>${d.approved ? sendStatusHtml(d) : ''}</section>`;
+}
+function sendStatusHtml(d) {
+  const s = Store.get('sends', []).filter(x => x.version === d.approvedAt).slice(-3).reverse();
+  if (!s.length) return '';
+  return `<div class="sendstat">${s.map(x => `<div>${x.kind === 'local' ? `✓ «${esc(x.name)}» оқушысына осы құрылғыда ашылды` : '✓ Оқушыға сілтеме және QR-код жасалды'} · ${nowStr(x.at)}</div>`).join('')}${s.some(x => x.kind === 'link') ? '<div class="small muted">Сілтеме арқылы жіберілген тапсырманың орындалғаны оқушы нәтиже сілтемесін қайтарғанда «Нәтижелер» бөлімінде көрінеді.</div>' : ''}</div>`;
 }
 function itemSummaryHtml(it) {
   if (it.type === 'calc') return `<div class="big">${esc(it.expr)} = ?</div>`;
@@ -434,21 +460,30 @@ function itemSummaryHtml(it) {
   if (it.type === 'match') return `<div><b>${esc(it.question)}</b><ul class="opts">${it.left.map((l, j) => `<li>${esc(l)} → ${esc(it.rightAns[j])}</li>`).join('')}</ul></div>`;
   return `<div>${it.passage ? `<p class="passage-s">${esc(it.passage)}</p>` : ''}<b>${esc(it.question)}</b><div class="small muted">${it.autoCheck ? 'Дұрыс жауап: ' + esc([...it.answers, ...(it.keywords.length ? ['кілт сөздер: ' + it.keywords.join(', ')] : [])].join('; ')) : 'Жауапты мұғалім тексереді'}</div></div>`;
 }
+function recRowHtml(it) {
+  const lr = localRecs()[it.id]; const valid = lr && lr.text === speechCore(it); const busy = recCtl && recCtl.id === it.id;
+  const st = busy ? '<span class="tag e">● Жазылып жатыр…</span>' : valid ? '<span class="tag g">Мұғалімнің дауысы жазылған (осы құрылғыда)</span>' : lr ? '<span class="tag w">Мәтін өзгерді, қайта жазыңыз</span>' : it.recKind === 'embed' ? '<span class="tag g">Кірістірілген жазба бар</span>' : '<span class="muted small">Жазба жоқ</span>';
+  return `<div class="recrow" data-recid="${it.id}">${icon('speaker')}<b>Дауыс:</b> ${st}<span class="spacer"></span>
+    ${busy ? '<button class="btn sm" data-recstop>⏹ Жазуды тоқтату</button>' : `<button class="btn ghost sm" data-recstart>🎙 ${lr ? 'Қайта жазу' : 'Дауыс жазу'}</button>`}
+    ${lr && !busy ? '<button class="btn ghost sm" data-recplay>▶ Тыңдау</button><button class="btn ghost sm" data-recdel aria-label="Жазбаны өшіру">' + icon('trash') + '</button>' : ''}</div>
+    ${busy ? `<div class="note small">Мына мәтінді анық оқыңыз: «${esc(speechCore(it))}»</div>` : ''}`;
+}
 function adaptCompare(it, i, S, ed) {
   return `<div class="cmp mt">
     <div class="src"><h4>Бастапқы тапсырма ${i + 1} · ${TYPES[it.type]}</h4><div class="srctxt">${esc(it.original)}</div></div>
     <div class="ad"><h4>Бейімделген тапсырма <span class="tag">алгоритм ұсынысы</span> ${it.edited ? '<span class="tag w">мұғалім өзгертті</span>' : ''}</h4>
     ${ed ? `<label class="f">Нұсқаулық</label><textarea class="inp" data-ed="instruction" data-id="${it.id}">${esc(it.instruction)}</textarea>
       ${S.simple ? `<label class="f">Қарапайым түсіндірме</label><textarea class="inp" data-ed="explain" data-id="${it.id}">${esc(it.explain)}</textarea>` : ''}
-      ${S.steps ? `<label class="f">Қадамдар (әр жолға бір қадам)</label><textarea class="inp" data-ed="hints" data-id="${it.id}">${esc(it.hints.join('\n'))}</textarea>` : ''}
+      <label class="f">Көмек қадамдары (әр жолға біреу; оқушы «Көмек алу» басқанда біртіндеп ашылады)</label><textarea class="inp" data-ed="hints" data-id="${it.id}">${esc(it.hints.join('\n'))}</textarea>
       <label class="f">Сұрақ</label><input class="inp" data-ed="question" data-id="${it.id}" value="${esc(it.question)}">
       ${S.visual && (!it.visual || it.visual.kind === 'text') ? `<label class="f">Көрнекі көмек</label><textarea class="inp" data-ed="visualText" data-id="${it.id}">${esc(it.visual ? it.visual.text : '')}</textarea>` : ''}`
     : `<div class="adinstr">${esc(it.instruction)}</div>
-      ${it.explain ? `<div class="small mt" style="margin-top:6px">${esc(it.explain)}</div>` : ''}
+      ${it.explain ? `<div class="mt" style="margin-top:6px">${esc(it.explain)}</div>` : ''}
       ${itemSummaryHtml(it)}
-      ${it.hints.length ? `<div class="small mt"><b>Қадамдар:</b><ol>${it.hints.map(h => `<li>${esc(h)}</li>`).join('')}</ol></div>` : ''}
+      ${it.hints.length ? `<details class="small mt"><summary>Көмек қадамдары (${it.hints.length}) — оқушы «Көмек алу» басқанда біртіндеп ашылады</summary><ol>${it.hints.map(h => `<li>${esc(h)}</li>`).join('')}</ol></details>` : ''}
       ${it.visual ? `<div class="small mt"><b>Көрнекі көмек:</b> ${it.visual.kind === 'groups' ? `${it.visual.groups} топ × ${it.visual.per} (оқушы өзі санайды)` : it.visual.kind === 'dots' ? 'нүктелер сызбасы' : esc(it.visual.text)}</div>` : ''}
-      <div class="row small mt">${SUPPORTS.filter(([k]) => S[k]).map(([, t]) => `<span class="tag g">${t}</span>`).join('') || '<span class="muted">Қолдау түрі әлі таңдалмаған</span>'}</div>`}
+      <div class="row small mt">${SUPPORTS.filter(([k]) => S[k]).map(([, t]) => `<span class="tag g">${t}</span>`).join('') || '<span class="muted">Қолдау түрі әлі таңдалмаған</span>'}</div>
+      ${S.tts ? recRowHtml(it) : ''}`}
     </div></div>`;
 }
 function senBlockHtml(L, d, items) {
@@ -460,13 +495,24 @@ function senBlockHtml(L, d, items) {
     <dt>Орындау тәсілі:</dt><dd>${esc(draftMethod(d))}</dd>
     <dt>Бағалау критерийі:</dt><dd>${esc(draftCriterion(d))}</dd></dl></div>`;
 }
-function planView(L, d, items) {
+function planView(L, d, items, mode = 'adapted') {
   const idx = d.stageIdx ?? L.senStageIdx ?? 0;
-  if (!L.stages.length) return `<div><p><b>Тақырып:</b> ${esc(L.topic)}</p>${L.objectives ? `<p><b>Оқу мақсаты:</b> ${esc(L.objectives)}</p>` : ''}${senBlockHtml(L, d, items)}</div>`;
-  return `<div class="scroll"><p><b>Тақырып:</b> ${esc(L.topic)}<br><b>Оқу мақсаты:</b> <span class="pre">${esc(L.objectives)}</span></p>
+  const head = `<p><b>Тақырып:</b> ${esc(L.topic)}${L.objectives ? `<br><b>Оқу мақсаты:</b> <span class="pre">${esc(L.objectives)}</span>` : ''}</p>`;
+  if (mode === 'diff') {
+    const stName = L.stages[idx]?.name || 'ҚМЖ соңы';
+    const summary = `<div class="note mt"><b>Не өзгерді:</b><ol style="margin:6px 0 0"><li>«${esc(stName)}» кезеңіне ЕББҚ оқушысына арналған бейімделген тапсырма блогы <b>қосылды</b> (${items.length} тапсырма).</li><li>Тақырып, оқу мақсаты, сабақ кезеңдері, басқа тапсырмалар, бағалау мен ресурстар <b>өзгерген жоқ</b>.</li></ol></div>`;
+    if (!L.stages.length) return head + summary + `<div class="diffgrid mt"><div><h4>Бастапқы</h4><p class="muted">Кезеңдер кестесі жоқ.</p></div><div><h4>Бейімделген</h4><div class="addmark">＋ Қосылды</div>${senBlockHtml(L, d, items)}</div></div>`;
+    return head + summary + `<div class="scroll mt"><table class="plan diff"><tr><th>Кезең</th><th>Бастапқы ҚМЖ (педагогтің әрекеті)</th><th>Бейімделген ҚМЖ (педагогтің әрекеті)</th></tr>
+      ${L.stages.map((s, i) => `<tr class="${i === idx ? 'chg' : ''}"><td class="st">${esc(s.name)}<div class="muted small">${esc(s.time)}</div></td>
+      <td><div class="pre">${esc(i === idx ? s.teacher : s.teacher.slice(0, 220) + (s.teacher.length > 220 ? '…' : ''))}</div></td>
+      <td>${i === idx ? `<div class="pre">${esc(s.teacher)}</div><div class="addmark">＋ Қосылды</div>${senBlockHtml(L, d, items)}` : '<span class="tag">өзгеріс жоқ</span>'}</td></tr>`).join('')}</table></div>`;
+  }
+  const withBlock = mode === 'adapted';
+  if (!L.stages.length) return `<div>${head}${withBlock ? senBlockHtml(L, d, items) : '<p class="muted">Бастапқы жоспарда ЕББҚ блогы жоқ.</p>'}</div>`;
+  return `<div class="scroll">${head}
    <table class="plan"><tr><th>Кезең / уақыт</th><th>Педагогтің әрекеті</th><th>Оқушының әрекеті</th><th>Бағалау</th><th>Ресурстар</th></tr>
    ${L.stages.map((s, i) => `<tr><td class="st">${esc(s.name)}<div class="muted small">${esc(s.time)}</div></td>
-     <td><div class="pre">${esc(s.teacher.length > 600 && i !== idx ? s.teacher.slice(0, 600) + '…' : s.teacher)}</div>${i === idx ? senBlockHtml(L, d, items) : ''}</td>
+     <td><div class="pre">${esc(s.teacher.length > 600 && i !== idx ? s.teacher.slice(0, 600) + '…' : s.teacher)}</div>${i === idx && withBlock ? senBlockHtml(L, d, items) : ''}</td>
      <td class="pre">${esc(s.student)}</td><td class="pre">${esc(s.assessment)}</td><td class="pre">${esc(s.resources)}</td></tr>`).join('')}</table></div>`;
 }
 function buildAssignment(L, d, studentId) {
@@ -474,59 +520,162 @@ function buildAssignment(L, d, studentId) {
   return { id: uid(), v: 2, version: d.approvedAt, studentId, sentAt: Date.now(), subject: L.subject || '', grade: L.grade, topic: L.topic,
     stage: L.stages[d.stageIdx ?? L.senStageIdx ?? 0]?.name || '', supports: { ...d.supports }, items: items.map(({ edited, original, ...x }) => x), method: draftMethod(d), criterion: draftCriterion(d) };
 }
+/* Сілтемеге жазылатын ықшам дерек: бастапқы тапсырмалар + қолдау + мұғалім түзетулері. Оқушы құрылғысында қайта құрастырылады. */
+function buildLinkPayload(L, d) {
+  const tasks = draftTasks(L).map(({ origin, stageIdx, selected, ...t }) => t);
+  const ids = new Set(tasks.map(t => taskId(t))); const custom = {}; Object.entries(d.custom || {}).forEach(([k, v]) => { if (ids.has(k)) custom[k] = v; });
+  return { v: 3, id: uid(), version: d.approvedAt, sentAt: Date.now(), subject: L.subject || '', grade: L.grade, topic: L.topic, stage: L.stages[d.stageIdx ?? L.senStageIdx ?? 0]?.name || '', supports: { ...d.supports }, tasks, custom, method: d.method || '', criterion: d.criterion || '' };
+}
+function assignmentFromPayload(p) {
+  if (p.v !== 3) return p;
+  const items = itemsFromTasks(p.tasks, p.supports || {}, p.custom).map(({ edited, original, ...x }) => x);
+  return { id: p.id, v: 3, version: p.version, sentAt: p.sentAt, subject: p.subject, grade: p.grade, topic: p.topic, stage: p.stage, supports: p.supports || {}, items, method: p.method || methodText(p.supports || {}), criterion: p.criterion || CRITERION_DEFAULT };
+}
+function logSend(kind, d) { const s = Store.get('sends', []); s.push({ kind, at: Date.now(), version: d.approvedAt, name: studentName(d.studentId) }); Store.set('sends', s.slice(-20)); }
+
+/* --- «Оқушыға жіберу» терезесі --- */
+function closeDlg() { const o = $('#sendDlg'); if (o) o.remove(); document.removeEventListener('keydown', dlgKey); }
+function dlgKey(e) { if (e.key === 'Escape') closeDlg(); }
+function openSendDialog() {
+  const L = getLesson(), d = getDraft(); if (!L || !d.approved) return;
+  closeDlg();
+  const ov = document.createElement('div'); ov.className = 'dlg-ov'; ov.id = 'sendDlg';
+  ov.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgT"><div class="row"><h2 id="dlgT" style="margin:0">Оқушыға жіберу</h2><span class="spacer"></span><button class="btn ghost sm" id="dlgX" aria-label="Жабу">✕ Жабу</button></div>
+    <p class="muted">Оқушы: <b>${esc(studentName(d.studentId))}</b> · ${draftItems(L, d).length} тапсырма · ${esc(L.topic)}</p>
+    <div class="grid2"><button class="sendchoice" id="sendLocal">${icon('student')}<b>Осы құрылғыда ашу</b><span>Оқушы кабинеті осы браузерде ашылады. Сыныптағы компьютерге немесе демонстрацияға ыңғайлы.</span></button>
+    <button class="sendchoice" id="sendLink">${icon('send')}<b>Сілтеме арқылы жіберу</b><span>Оқушы тапсырманы өз телефонында немесе компьютерінде ашады. Сілтеме мен QR-код жасалады.</span></button></div>
+    <div id="dlgOut"></div></div>`;
+  document.body.appendChild(ov);
+  $('#dlgX').onclick = closeDlg; ov.onclick = e => { if (e.target === ov) closeDlg(); }; document.addEventListener('keydown', dlgKey);
+  $('#sendLocal').focus();
+  $('#sendLocal').onclick = () => {
+    const all = Store.get('assignments', {}); all[d.studentId] = buildAssignment(L, d, d.studentId); Store.set('assignments', all);
+    try { sessionStorage.setItem('qj_sid', d.studentId); } catch (e) { }
+    logSend('local', d); closeDlg(); toast(`Тапсырма «${studentName(d.studentId)}» оқушысына жіберілді. Оқушы кабинеті ашылды.`, 'ok'); go('/s/home');
+  };
+  $('#sendLink').onclick = async () => {
+    const out = $('#dlgOut'); out.innerHTML = '<p class="muted mt">Сілтеме жасалып жатыр…</p>';
+    try {
+      const url = baseUrl() + '#/s/open/' + await packData(buildLinkPayload(L, d));
+      let qr = ''; try { qr = qrSvg(url); } catch (e) { console.error(e); }
+      logSend('link', d);
+      const local = location.protocol === 'file:';
+      out.innerHTML = `<div class="linkres mt"><div class="qrbox">${qr ? qr + '<p class="small muted">Оқушы телефонының камерасымен сканерлейді</p>' : '<p class="small muted">QR-код жасау мүмкін болмады. Сілтемені көшіріп жіберіңіз.</p>'}</div>
+        <div><label class="f" for="linkInp">Оқушыға арналған сілтеме</label><input class="inp" id="linkInp" readonly value="${esc(url)}">
+        <div class="row mt"><button class="btn" id="copyLink">${icon('check')}Сілтемені көшіру</button>${navigator.share ? `<button class="btn ghost" id="shareLink">${icon('send')}Бөлісу</button>` : ''}<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">${icon('eye')}Ашып көру</a></div>
+        <p class="small muted mt">Сілтемені WhatsApp, электрондық пошта немесе басқа жолмен жіберіңіз. Сілтемеде оқушының жеке деректері жоқ. Оқушы аяқтаған соң, нәтиже сілтемесін сізге қайтарады.</p>
+        ${local ? '<div class="note w small">Қосымша компьютердегі файлдан ашылған. Мұндай сілтеме басқа құрылғыда ашылмайды. Басқа құрылғыға жіберу үшін платформаны сайттан ашыңыз: shermo67.github.io/qoljetim-ai</div>' : ''}</div></div>`;
+      $('#copyLink').onclick = async () => { const ok = await copyText(url); if (!ok) { $('#linkInp').select(); } toast(ok ? 'Сілтеме көшірілді' : 'Көшіру мүмкін болмады: сілтеме белгіленді, Ctrl+C басыңыз', ok ? 'ok' : 'err'); };
+      $('#shareLink') && ($('#shareLink').onclick = () => navigator.share({ title: 'QolJetim AI тапсырма', url }).catch(() => { }));
+      if ($('#actTop')) { $$('.actcard').forEach(c => { const old = c.querySelector('.sendstat'); const html = sendStatusHtml(d); if (old) old.outerHTML = html; else c.insertAdjacentHTML('beforeend', html); }); }
+    } catch (e) { console.error(e); out.innerHTML = '<div class="note e mt">Сілтеме жасау мүмкін болмады. Браузерді жаңартып көріңіз.</div>'; }
+  };
+}
+
+/* --- Мұғалімнің дауысын жазу (MediaRecorder; тек осы құрылғыда сақталады) --- */
+async function startRecording(it) {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast('Бұл браузерде дауыс жазу мүмкін емес', 'err'); return; }
+  if (recCtl) { toast('Алдымен басталған жазуды тоқтатыңыз', 'err'); return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { toast('Микрофонға рұқсат берілмеді', 'err'); return; }
+  const mt = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'].find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+  let mr; try { mr = new MediaRecorder(stream, mt ? { mimeType: mt, audioBitsPerSecond: 32000 } : undefined); } catch (e) { mr = new MediaRecorder(stream); }
+  const chunks = []; const text = speechCore(it); const id = it.id;
+  mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop()); if (recCtl) clearTimeout(recCtl.timer); recCtl = null;
+    const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+    if (blob.size < 800) { toast('Жазба тым қысқа болды, қайта жазыңыз', 'err'); render(); return; }
+    const fr = new FileReader(); fr.onload = () => { const all = localRecs(); all[id] = { data: fr.result, text, at: Date.now() }; Store.set('recs', all); toast('Дауыс сақталды (осы құрылғыда)', 'ok'); render(); }; fr.readAsDataURL(blob);
+  };
+  mr.start(); recCtl = { id, mr, timer: setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 60000) };
+  render();
+}
+
 function bindAdapt() {
   const L = getLesson(); if (!L || !$('#stuSel')) return;
   $('#stuSel').onchange = e => { const d = getDraft(); d.studentId = e.target.value; saveDraft(d, true); render(); };
   $$('[data-sup]').forEach(cb => cb.onchange = () => { const d = getDraft(); d.supports = { ...d.supports, [cb.dataset.sup]: cb.checked }; saveDraft(d); render(); });
-  $('#editBtn').onclick = () => {
-    if (state.editMode) {
-      const d = getDraft(); const before = JSON.stringify(d.custom || {}) + d.method + d.criterion; d.custom = d.custom || {};
-      const S = d.supports || {};
-      $$('[data-ed]').forEach(el => {
-        const id = el.dataset.id, f = el.dataset.ed; const t = L.tasks.find(x => taskId(x) === id); if (!t) return;
-        const base = adaptTask(t, S);
-        let v = el.value.trim(); if (f === 'hints') v = v.split('\n').map(x => x.trim()).filter(Boolean);
-        const baseV = f === 'visualText' ? (base.visual && base.visual.kind === 'text' ? base.visual.text : '') : base[f];
-        const same = f === 'hints' ? JSON.stringify(v) === JSON.stringify(baseV) : v === baseV;
-        d.custom[id] = d.custom[id] || {}; if (same) delete d.custom[id][f]; else d.custom[id][f] = v;
-        if (!Object.keys(d.custom[id]).length) delete d.custom[id];
-      });
-      const m = $('#edMethod').value.trim(), c = $('#edCrit').value.trim();
-      d.method = m === methodText(S) ? '' : m; d.criterion = c === CRITERION_DEFAULT ? '' : c; d.reviewed = true;
-      const changed = before !== JSON.stringify(d.custom) + d.method + d.criterion;
-      saveDraft(d, !changed); state.editMode = false; toast(changed ? 'Өзгерістер сақталды. Қайта бекітіңіз.' : 'Өзгеріс жоқ', 'ok'); render();
-    } else { state.editMode = true; const d = getDraft(); d.reviewed = true; saveDraft(d, true); render(); }
+  const saveEdits = () => {
+    const d = getDraft(); const before = JSON.stringify(d.custom || {}) + d.method + d.criterion; d.custom = d.custom || {}; const S = d.supports || {};
+    $$('[data-ed]').forEach(el => {
+      const id = el.dataset.id, f = el.dataset.ed; const t = L.tasks.find(x => taskId(x) === id); if (!t) return;
+      const base = adaptTask(t, S); let v = el.value.trim(); if (f === 'hints') v = v.split('\n').map(x => x.trim()).filter(Boolean);
+      const baseV = f === 'visualText' ? (base.visual && base.visual.kind === 'text' ? base.visual.text : '') : base[f];
+      const same = f === 'hints' ? JSON.stringify(v) === JSON.stringify(baseV) : v === baseV;
+      d.custom[id] = d.custom[id] || {}; if (same) delete d.custom[id][f]; else d.custom[id][f] = v;
+      if (!Object.keys(d.custom[id]).length) delete d.custom[id];
+    });
+    const m = $('#edMethod').value.trim(), c = $('#edCrit').value.trim();
+    d.method = m === methodText(S) ? '' : m; d.criterion = c === CRITERION_DEFAULT ? '' : c; d.reviewed = true;
+    const changed = before !== JSON.stringify(d.custom) + d.method + d.criterion;
+    saveDraft(d, !changed); state.editMode = false; toast(changed ? 'Өзгерістер сақталды. Қайта бекітіңіз.' : 'Өзгеріс жоқ', 'ok'); render();
   };
+  $('#editBtn').onclick = () => { if (state.editMode) saveEdits(); else { state.editMode = true; const d = getDraft(); d.reviewed = true; saveDraft(d, true); render(); } };
+  $('#editBtn2') && ($('#editBtn2').onclick = saveEdits);
   $('#resetEdits') && ($('#resetEdits').onclick = () => { const d = getDraft(); d.custom = {}; d.method = ''; d.criterion = ''; saveDraft(d); state.editMode = false; toast('Бастапқы ұсыныс қайтарылды'); render(); });
   $('#previewBtn').onclick = () => { if (state.editMode) { toast('Алдымен «Өңдеуді сақтау» батырмасын басыңыз', 'err'); return; } const d = getDraft(); d.reviewed = true; saveDraft(d, true); state.run = null; go('/s/preview'); };
-  $('#approveBtn').onclick = () => {
+  $$('[data-approve]').forEach(b => b.onclick = () => {
     if (state.editMode) { toast('Алдымен «Өңдеуді сақтау» батырмасын басыңыз', 'err'); return; }
-    const d = getDraft(); if (!Object.values(d.supports || {}).some(Boolean)) { toast('Кемінде бір қолдау түрін таңдаңыз', 'err'); return; }
+    const d = getDraft(); if (!Object.values(d.supports || {}).some(Boolean)) { toast('Кемінде бір қолдау түрін таңдаңыз', 'err'); $('#stuSel').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     d.approved = true; d.approvedAt = Date.now(); d.needReapprove = false; Store.set('draft', d); toast('Тапсырма бекітілді және ҚМЖ-ға кіріктірілді', 'ok'); render();
-  };
-  $('#sendBtn').onclick = () => {
-    const d = getDraft(); if (!d.approved) return;
-    const all = Store.get('assignments', {}); all[d.studentId] = buildAssignment(L, d, d.studentId); Store.set('assignments', all);
-    try { sessionStorage.setItem('qj_sid', d.studentId); } catch (e) { }
-    toast(`Тапсырма «${studentName(d.studentId)}» оқушысына жіберілді`, 'ok'); render();
-  };
-  $('#linkBtn').onclick = async () => {
-    const d = getDraft(); if (!d.approved) return;
-    try {
-      const asg = buildAssignment(L, d, 'link'); const url = baseUrl() + '#/s/open/' + await packData(asg);
-      const copied = await copyText(url);
-      $('#linkOut').innerHTML = `<div class="linkbox mt"><input class="inp" readonly value="${esc(url)}" aria-label="Оқушыға арналған сілтеме"><div class="row mt"><button class="btn sm" id="copyLink">${icon('check')}Көшіру</button>${navigator.share ? `<button class="btn ghost sm" id="shareLink">${icon('send')}Бөлісу</button>` : ''}<a class="btn ghost sm" href="${esc(url)}" target="_blank" rel="noopener">${icon('eye')}Ашып көру</a></div><p class="small muted">${copied ? '✓ Сілтеме көшірілді. ' : ''}Оны оқушыға WhatsApp, электрондық пошта немесе басқа жолмен жіберіңіз. Сілтемеде оқушының жеке деректері жоқ.</p></div>`;
-      $('#copyLink').onclick = async () => toast(await copyText(url) ? 'Көшірілді' : 'Көшіру мүмкін болмады, сілтемені қолмен белгілеп алыңыз', 'ok');
-      $('#shareLink') && ($('#shareLink').onclick = () => navigator.share({ title: 'QolJetim AI тапсырма', url }).catch(() => { }));
-    } catch (e) { console.error(e); toast('Сілтеме жасау мүмкін болмады', 'err'); }
-  };
+    setTimeout(() => $('#actTop')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+  });
+  $$('[data-send]').forEach(b => b.onclick = () => { if (!b.disabled) openSendDialog(); });
+  $$('[data-pm]').forEach(b => b.onclick = () => { state.planMode = b.dataset.pm; const y = window.scrollY; render(); window.scrollTo(0, y); });
+  $$('.recrow').forEach(row => {
+    const id = row.dataset.recid; const it = draftItems(L, getDraft()).find(x => x.id === id); if (!it) return;
+    row.querySelector('[data-recstart]') && (row.querySelector('[data-recstart]').onclick = () => startRecording(it));
+    row.querySelector('[data-recstop]') && (row.querySelector('[data-recstop]').onclick = () => { if (recCtl && recCtl.mr.state === 'recording') recCtl.mr.stop(); });
+    row.querySelector('[data-recplay]') && (row.querySelector('[data-recplay]').onclick = () => { const r = localRecs()[id]; if (!r) return; if (window.__qjAudio) window.__qjAudio.pause(); const a = new Audio(r.data); window.__qjAudio = a; a.play().catch(() => toast('Ойнату мүмкін болмады', 'err')); });
+    row.querySelector('[data-recdel]') && (row.querySelector('[data-recdel]').onclick = () => { if (!confirm('Жазба өшірілсін бе?')) return; const all = localRecs(); delete all[id]; Store.set('recs', all); render(); });
+  });
   $('#printBtn').onclick = () => printPlan(L, getDraft());
   $('#wordBtn').onclick = () => exportWord(L, getDraft()).catch(e => { console.error(e); toast('Word файлын жасау мүмкін болмады', 'err'); });
 }
 function printPlan(L, d) {
   const w = window.open('', '_blank'); if (!w) { toast('Браузер жаңа терезені бұғаттады', 'err'); return; }
-  w.document.write(`<!DOCTYPE html><html lang="kk"><head><meta charset="utf-8"><title>${esc(L.topic)}</title><style>${$('style').textContent}</style></head><body style="background:#fff"><main class="wrap"><h2>${esc(L.subject)} ${L.grade ? esc(L.grade) + '-сынып' : ''}</h2>${planView(L, d, draftItems(L, d))}</main></body></html>`);
+  w.document.write(`<!DOCTYPE html><html lang="kk"><head><meta charset="utf-8"><title>${esc(L.topic)}</title><style>${$('style').textContent}</style></head><body style="background:#fff"><main class="wrap"><h2>${esc(L.subject)} ${L.grade ? esc(L.grade) + '-сынып' : ''}</h2>${planView(L, d, draftItems(L, d), 'adapted')}</main></body></html>`);
   w.document.close(); setTimeout(() => w.print(), 300);
+}
+
+/* ---------------- Бейімдеуге дейін және кейін ---------------- */
+function beforeHtml(t, L) {
+  const stage = L.stages[t.stageIdx ?? L.senStageIdx ?? -1]?.name;
+  let body = '';
+  if (t.type === 'calc') { const p = parseExpr(t.expr); body = `<p class="sh-i">Есепте.</p><p class="sh-x">${esc(p ? p.expr : t.expr)} = ______</p>`; }
+  if (t.type === 'choice') body = `<p class="sh-i">${esc(t.question)}</p><p>${t.options.filter(x => x.trim()).map((o, j) => `${'АӘБВГҒ'[j]}) ${esc(o)}`).join('&nbsp;&nbsp;&nbsp;')}</p>`;
+  if (t.type === 'match') { const ps = t.pairs.filter(p => p[0] && p[1]); const r = seededShuffle(ps.map(p => p[1]), 'before' + t.id); body = `<p class="sh-i">${esc(t.question || 'Сәйкестендір.')}</p><div class="sh-cols"><ol>${ps.map(p => `<li>${esc(p[0])}</li>`).join('')}</ol><ol type="a">${r.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`; }
+  if (t.type === 'short') body = `<p class="sh-i">${esc(t.question)}</p><p>Жауабы: ________________</p>`;
+  if (t.type === 'text') body = `<p class="sh-t">${esc(t.passage)}</p><p class="sh-i">${esc(t.question)}</p><p>Жауабы: ________________</p>`;
+  return `<div class="sh-h">ҚМЖ${stage ? ' · ' + esc(stage) : ''} · ${TYPES[t.type]}</div>${body}`;
+}
+function tCompare() {
+  const L = getLesson(); if (!L) return `<h1>Бейімдеуге дейін және кейін</h1><section class="card"><p>Алдымен сабақты таңдаңыз.</p><button class="btn" data-go="/t/upload">${icon('upload')}Сабақ таңдау</button></section>`;
+  const d = getDraft(); const items = draftItems(L, d); const tasks = draftTasks(L);
+  if (!items.length) return `<h1>Бейімдеуге дейін және кейін</h1><section class="card"><p>Оқушыға берілетін тапсырма таңдалмаған.</p><button class="btn" data-go="/t/upload">${icon('edit')}Тапсырмаларды белгілеу</button></section>`;
+  const S = d.supports || {}; const i = Math.min(state.cmpIdx || 0, items.length - 1);
+  return `<div class="row"><h1 style="margin:0">Бейімдеуге дейін және кейін</h1><span class="spacer"></span><button class="btn ghost sm" data-go="/t/adapt">${icon('left')}Бейімдеуге оралу</button></div>
+  <p class="muted">Сол жақта ҚМЖ-дағы бастапқы тапсырма. Оң жақта сол тапсырма оқушының көзімен: таңдалған қолдау қосылған, батырмаларды басып көруге болады.</p>
+  <div class="row cmptabs" role="tablist" aria-label="Тапсырмалар">${items.map((x, j) => `<button role="tab" aria-selected="${j === i}" class="btn ${j === i ? '' : 'ghost'} sm" data-ci="${j}">${j + 1}. ${esc(TYPES[x.type])}</button>`).join('')}</div>
+  ${Object.values(S).some(Boolean) ? '' : '<div class="note w mt">Қолдау түрі әлі таңдалмаған, сондықтан оң жақта өзгеріс аз. «Тапсырманы бейімдеу» бөлімінде қолдау түрлерін таңдаңыз.</div>'}
+  <div class="ba mt">
+    <section class="ba-col before" aria-label="Бейімдеуге дейін"><h2>Бейімдеуге дейін</h2>
+      <div class="sheet">${beforeHtml(tasks[i], L)}</div>
+      <ul class="ba-list"><li>ҚМЖ-дағы бастапқы мәтін мен нұсқаулық</li><li>Баспа парақ пішімі, стандартты әріп өлшемі</li><li>Көмек, дыбыстау, көрнекі тірек жоқ</li></ul></section>
+    <section class="ba-col after" aria-label="Бейімдеуден кейін"><h2>Бейімдеуден кейін</h2>
+      <div class="row small" style="gap:6px;margin-bottom:8px">${SUPPORTS.filter(([k]) => S[k]).map(([, t]) => `<span class="tag g">${t}</span>`).join('')}<span class="tag">+ «Көмек алу», «Контраст», «Әріп өлшемі»</span></div>
+      <div id="cmpRight" class="stu-frame"></div></section>
+  </div>
+  <div class="note g mt goalnote"><b>Оқу мақсаты өзгермейді. Тапсырманың берілу және орындалу тәсілі оқушының қажеттілігіне қарай бейімделеді.</b>${L.objectives ? `<div class="small mt">Оқу мақсаты: ${esc(L.objectives)}</div>` : ''}</div>
+  ${d.approved ? '' : '<p class="muted small mt">Бұл жоба. Оқушыға жіберу үшін «Тапсырманы бейімдеу» бөлімінде бекітіңіз.</p>'}`;
+}
+function bindCompare() {
+  const L = getLesson(); if (!L || !$('#cmpRight')) return;
+  const d = getDraft(); const i = Math.min(state.cmpIdx || 0, draftItems(L, d).length - 1);
+  $$('[data-ci]').forEach(b => b.onclick = () => { state.cmpIdx = +b.dataset.ci; render(); });
+  const asg = buildAssignment(L, d, 'preview');
+  startRun(asg, 'preview', true); state.run.compare = true; state.run.idx = i; state.run.hc = false;
+  renderTask();
 }
 
 /* ---------------- Word экспорты ---------------- */
@@ -628,8 +777,8 @@ function tResults() {
   return `<h1>Нәтижелер</h1><p class="muted">Оқушы тапсырманы аяқтағанда нәтиже осында пайда болады. Басқа құрылғыдағы оқушы нәтижені сілтеме арқылы жібереді.</p>
   <section class="card"><h3>Оқушыдан келген сілтеме</h3><div class="row"><input class="inp" id="impUrl" placeholder="Оқушы жіберген сілтемені осында қойыңыз" style="flex:1;min-width:220px"><button class="btn" id="impBtn">${icon('down')}Нәтижені қосу</button></div><p class="small muted">Сілтемені жай ашсаңыз да, нәтиже автоматты түрде қосылады.</p></section>
   ${res.length ? res.map(r => `<section class="card"><div class="row"><h3 style="margin:0">${esc(r.studentName)}</h3><span class="tag">${nowStr(r.finishedAt)}</span>${r.viaLink ? '<span class="tag w">сілтеме арқылы</span>' : ''}<span class="spacer"></span><span class="muted small">${esc(r.subject ? r.subject + ' · ' : '')}${esc(r.topic)}</span></div>
-     <div class="stats"><div class="stat"><b>${r.done}/${r.total}</b>орындалған тапсырма</div><div class="stat"><b>${r.correct}</b>дұрыс жауап</div><div class="stat"><b>${r.firstTry}</b>бірінші әрекеттен дұрыс</div></div>
-     <div class="scroll mt"><table class="tbl"><tr><th>Тапсырма</th><th>Нәтиже</th><th>Әрекет</th><th>Ашылған қадамдар</th><th>Көрнекі көмек</th></tr>
+     <div class="stats six"><div class="stat"><b>${r.done}/${r.total}</b>орындалған тапсырма</div><div class="stat"><b>${r.correct}</b>дұрыс жауап</div><div class="stat"><b>${r.firstTry}</b>бірінші әрекеттен дұрыс</div><div class="stat"><b>${r.items.reduce((s, i) => s + (i.attempts || 0), 0)}</b>барлық әрекет</div><div class="stat"><b>${r.items.reduce((s, i) => s + (i.hints || 0), 0)}</b>ашылған көмек</div><div class="stat"><b>${r.items.filter(i => i.visual).length}</b>көрнекі көмек қолданылған тапсырма</div></div>
+     <div class="scroll mt"><table class="tbl"><tr><th>Тапсырма</th><th>Нәтиже</th><th>Әрекет саны</th><th>Ашылған көмек</th><th>Көрнекі көмек</th></tr>
      ${r.items.map((i, j) => `<tr><td><b>${esc(i.original)}</b>${i.answer ? `<div class="small">Оқушының жауабы: «${esc(i.answer)}»</div>` : ''}</td><td>${i.pending ? `<span class="tag w">мұғалім тексереді</span><div class="row mt"><button class="btn sm" data-mark="${r.id}:${j}:1">Дұрыс</button><button class="btn ghost sm" data-mark="${r.id}:${j}:0">Қате</button></div>` : i.correct ? '<span class="tag g">✓ дұрыс</span>' : '<span class="tag w">көмек қажет</span>'}</td><td>${i.attempts}</td><td>${i.hints}</td><td>${i.visual ? 'қолданды' : '—'}</td></tr>`).join('')}</table></div>
      <p class="muted small mt">Қолдау: ${esc(Object.entries(r.supports || {}).filter(([, v]) => v).map(([k]) => SUP_LABEL[k]).join(', ') || '—')}${r.tools ? ' · Оқушы қолданған құралдар: ' + esc(r.tools.join(', ')) : ''}</p></section>`).join('')
     : `<section class="card"><p class="muted">Әзірге нәтиже жоқ. Тапсырманы оқушыға жіберіп, оқушы кабинетінде орындаңыз.</p><button class="btn blue" data-go="/s">${icon('student')}Оқушы кабинетін ашу</button></section>`}
@@ -664,7 +813,7 @@ function studentShell(body, back) {
 }
 async function openAssignmentLink(data) {
   try {
-    const asg = await unpackData(data); if (!asg || !asg.items) throw new Error('bad');
+    const asg = assignmentFromPayload(await unpackData(data)); if (!asg || !asg.items || !asg.items.length) throw new Error('bad');
     const all = Store.get('assignments', {}); if (!all.link || all.link.id !== asg.id) { all.link = { ...asg, studentId: 'link', viaLink: true }; Store.set('assignments', all); }
     try { sessionStorage.setItem('qj_sid', 'link'); } catch (e) { }
     location.replace(baseUrl() + '#/s/home');
@@ -707,38 +856,73 @@ function studentRender(sec) {
   $('#refresh') && ($('#refresh').onclick = () => render());
 }
 function startRun(asg, sid, preview = false) {
-  asg.items.forEach(it => { if (!it.type) it.type = 'calc'; if (it.type === 'calc' && !it.expr) { it.op = ':'; it.expr = `${fmt(it.a)} : ${fmt(it.b)}`; } if (!it.label) it.label = it.original || (it.type === 'calc' ? it.expr + ' = ?' : it.question); });
+  asg.items.forEach(it => { if (!it.type) it.type = 'calc'; if (it.type === 'calc' && !it.expr) { it.op = ':'; it.expr = `${fmt(it.a)} : ${fmt(it.b)}`; } if (!it.label) it.label = it.original || (it.type === 'calc' ? it.expr + ' = ?' : it.question); if (!it.hints) it.hints = []; });
   state.run = { asgId: asg.id, sid, asg, idx: 0, preview, viaLink: !!asg.viaLink, scale: asg.supports.bigText ? 1.35 : 1, finished: false, tools: new Set(),
     per: asg.items.map(() => ({ attempts: 0, hints: 0, correct: false, firstTry: false, visual: false, solved: false, pending: false, answer: '', choice: null, match: [] })) };
 }
-function useTool(name) { if (state.run) state.run.tools.add(name); markTour('tools'); }
-function itemSpeech(it, P) {
-  const parts = [it.instruction, it.explain, it.passage, it.type === 'calc' ? '' : it.question];
-  if (it.type === 'choice') parts.push(it.options.map((o, j) => `${j + 1}) ${o}`).join('. '));
-  if (it.type === 'match') parts.push(it.left.join(', '));
-  parts.push(...it.hints.slice(0, P.hints)); if (it.type === 'calc') parts.push(it.question);
-  return parts.filter(Boolean).map(x => String(x).replace(/[.!?\s]+$/, '')).join('. ') + '.';
+function useTool(name) { if (state.run) state.run.tools.add(name); if (!(state.run && state.run.compare)) markTour('tools'); }
+
+/* --- Дыбыстау: жазба → браузер дауысы → шынайы ескерту. Тоқтату және қайта тыңдау. --- */
+function stopSpeech() {
+  if (window.__qjAudio) { try { window.__qjAudio.pause(); } catch (e) { } window.__qjAudio = null; }
+  if (TTS.api) { TTS.cur = null; speechSynthesis.cancel(); }
+}
+function playerHtml(kind, msg, playing) {
+  return `<div class="player note ${kind}" role="status"><span class="pl-msg">${msg}</span><span class="spacer"></span>${playing ? '<button class="btn ghost sm" data-pl="stop">⏹ Тоқтату</button>' : ''}<button class="btn ghost sm" data-pl="again">↻ ${playing ? 'Басынан' : 'Қайта тыңдау'}</button></div>`;
+}
+function speakItem() {
+  const R = state.run, it = R.asg.items[R.idx], P = R.per[R.idx], S = R.asg.supports;
+  const box = $('#ttsMsg'); if (!box) return;
+  stopSpeech(); useTool('Мәтінді тыңдау');
+  const set = (kind, msg, playing) => { if (!document.body.contains(box)) return; box.innerHTML = playerHtml(kind, msg, playing); box.querySelector('[data-pl="stop"]') && (box.querySelector('[data-pl="stop"]').onclick = () => { stopSpeech(); set('', 'Дыбыс тоқтатылды.', false); }); box.querySelector('[data-pl="again"]').onclick = speakItem; };
+  const hintsText = it.hints.slice(0, P.hints).map((h, i) => `${i + 1}-қадам. ${h}`).join(' ');
+  const speakTTS = (text, after) => {
+    const err = TTS.speak(text, (st, code) => {
+      if (st === 'wait') set('', 'Дауыс қосылып жатыр…', true);
+      else if (st === 'playing') set('g', `🔊 Оқылып жатыр (${esc(TTS.voice.name)}). Естілмесе, құрылғының дыбысын тексеріңіз.`, true);
+      else if (st === 'end') { if (after) after(); else set('', '✓ Оқылып болды.', false); }
+      else if (st === 'error') set('w', `Дыбыстау кезінде қате шықты (${esc(code || 'белгісіз')}). Интернетті тексеріп, қайта басыңыз.`, false);
+      else set('w', 'Дыбыс басталмады. Құрылғының және браузер қойындысының дыбысы қосулы ма, интернет бар ма, тексеріңіз.', false);
+    });
+    if (err) set('w', esc(rec ? err : 'Бұл тапсырмаға жазылған дауыс жоқ, ал осы браузерде қазақ тілді дауыс табылмады, сондықтан мәтін дыбысталмайды. Басқа тілдегі дауысты қазақша деп ұсынбаймыз. Шешімі: платформаны Microsoft Edge-те (интернетпен) ашу немесе мұғалім «Дауыс жазу» арқылы өз дауысын жазып қою.'), false);
+  };
+  const rec = playableRec(it, S);
+  if (rec) {
+    const au = new Audio(rec); window.__qjAudio = au; let started = false;
+    const t = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    const msg = () => `🔊 Жазылған дауыс: ${t(au.currentTime)}${isFinite(au.duration) ? ' / ' + t(au.duration) : ''}. Естілмесе, құрылғының дыбысын тексеріңіз.`;
+    au.ontimeupdate = () => { if (window.__qjAudio !== au) return; if (au.currentTime > 0.15) started = true; const m = box.querySelector('.pl-msg'); if (m && started) m.textContent = msg(); };
+    au.onplaying = () => { if (window.__qjAudio === au) set('g', 'Жазба ойнатылуда…', true); };
+    au.onended = () => { if (window.__qjAudio !== au) return; window.__qjAudio = null; if (P.hints && TTS.voice) speakTTS(hintsText); else set('', '✓ Тыңдап болдың.' + (P.hints && !TTS.voice ? ' (Көмек қадамдарын өзің оқы.)' : ''), false); };
+    au.onerror = () => { if (window.__qjAudio === au) set('w', 'Жазылған дауысты ойнату мүмкін болмады. Браузерді жаңартып, қайта басыңыз.', false); };
+    au.play().then(() => setTimeout(() => { if (window.__qjAudio === au && !started && !au.paused) set('w', 'Дыбыс ойнатылмады (жазба басталмады). Қайта басып көріңіз.', false); }, 3000))
+      .catch(() => set('w', 'Браузер дыбысты ойнатуға рұқсат бермеді. Батырманы қайта басыңыз.', false));
+    return;
+  }
+  speakTTS(speechCore(it) + (hintsText ? ' ' + hintsText : ''));
 }
 function answerArea(it, P) {
   const dis = P.solved ? 'disabled' : '';
-  if (it.type === 'calc') return `<form class="answer" id="ansForm" autocomplete="off"><label for="ans">Жауап:</label><input id="ans" inputmode="numeric" ${dis} aria-label="Жауап">${it.remainder ? `<label for="rem">қалдық:</label><input id="rem" inputmode="numeric" ${dis} aria-label="Қалдық">` : ''}<button class="btn lg" type="submit" ${dis}>${icon('check')}Жауапты тексеру</button></form>`;
-  if (it.type === 'choice') return `<form id="ansForm"><div class="choices" role="radiogroup" aria-label="Жауап нұсқалары">${it.options.map((o, j) => `<button type="button" class="choice ${P.choice === j ? 'on' : ''}" role="radio" aria-checked="${P.choice === j}" data-ch="${j}" ${dis}><span class="cl">${'АӘБВГҒ'[j]}</span><span>${esc(o)}</span></button>`).join('')}</div><div class="row mt" style="justify-content:center"><button class="btn lg" type="submit" ${dis}>${icon('check')}Жауапты тексеру</button></div></form>`;
-  if (it.type === 'match') return `<form id="ansForm"><div class="matchrows">${it.left.map((l, j) => `<div class="mrow" id="mr${j}"><span class="ml">${esc(l)}</span><span aria-hidden="true">→</span><select class="inp msel" data-m="${j}" ${dis} aria-label="${esc(l)} үшін сәйкесін таңда"><option value="">Таңда…</option>${it.rightOpts.map(r => `<option ${P.match[j] === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select><span class="mmark" id="mm${j}"></span></div>`).join('')}</div><div class="row mt" style="justify-content:center"><button class="btn lg" type="submit" ${dis}>${icon('check')}Жауапты тексеру</button></div></form>`;
-  return `<form class="answer txt" id="ansForm" autocomplete="off"><label for="ans">Жауап:</label><input id="ans" ${dis} value="${esc(P.answer)}" aria-label="Жауап"><button class="btn lg" type="submit" ${dis}>${icon('check')}Жауапты тексеру</button></form>`;
+  const check = `<button class="btn lg" type="submit" ${dis}>${icon('check')}Жауапты тексеру</button>`;
+  if (it.type === 'calc') return `<form class="answer" id="ansForm" autocomplete="off"><label for="ans">Жауап:</label><input id="ans" inputmode="numeric" ${dis} aria-label="Жауап">${it.remainder ? `<label for="rem">қалдық:</label><input id="rem" inputmode="numeric" ${dis} aria-label="Қалдық">` : ''}${check}</form>`;
+  if (it.type === 'choice') return `<form id="ansForm"><div class="choices" role="radiogroup" aria-label="Жауап нұсқалары">${it.options.map((o, j) => `<button type="button" class="choice ${P.choice === j ? 'on' : ''}" role="radio" aria-checked="${P.choice === j}" data-ch="${j}" ${dis}><span class="cl">${'АӘБВГҒ'[j]}</span><span>${esc(o)}</span></button>`).join('')}</div><div class="row mt" style="justify-content:center">${check}</div></form>`;
+  if (it.type === 'match') return `<form id="ansForm"><div class="matchrows">${it.left.map((l, j) => `<div class="mrow" id="mr${j}"><span class="ml">${esc(l)}</span><span aria-hidden="true">→</span><select class="inp msel" data-m="${j}" ${dis} aria-label="${esc(l)} үшін сәйкесін таңда"><option value="">Таңда…</option>${it.rightOpts.map(r => `<option ${P.match[j] === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select><span class="mmark" id="mm${j}"></span></div>`).join('')}</div><div class="row mt" style="justify-content:center">${check}</div></form>`;
+  return `<form class="answer txt" id="ansForm" autocomplete="off"><label for="ans">Жауап:</label><input id="ans" ${dis} value="${esc(P.answer)}" aria-label="Жауап">${check}</form>`;
 }
-function renderTask() {
-  if (window.__qjAudio) { window.__qjAudio.pause(); window.__qjAudio = null; }
-  if (TTS.api) speechSynthesis.cancel();
+function helpBtnHtml(it, P) {
+  if (!it.hints.length) return '';
+  const left = it.hints.length - P.hints;
+  return `<button class="btn help lg" id="helpBtn" ${left <= 0 ? 'disabled' : ''}>${icon('bulb')}${left <= 0 ? 'Барлық көмек ашылды' : `Көмек алу <span class="hcnt">${P.hints + 1}/${it.hints.length}</span>`}</button>`;
+}
+function taskSectionHtml() {
   const R = state.run, asg = R.asg, it = asg.items[R.idx], P = R.per[R.idx], S = asg.supports, n = asg.items.length;
-  const hc = !!Store.get('contrast', false); document.body.classList.toggle('hc', hc);
-  const hasRec = !!(window.QJ_AUDIO || {})[it.id];
-  $('#app').innerHTML = studentShell(`
-   <div class="row stuhead"><b class="pcount">${R.idx + 1}/${n} тапсырма</b><span class="spacer"></span><span class="ptopic">${esc(asg.subject || '')}${asg.subject ? ' · ' : ''}${esc(asg.topic)}</span></div>
-   <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${R.idx + (P.solved ? 1 : 0)}" aria-label="Прогресс"><i style="width:${((R.idx + (P.solved ? 1 : 0)) / n) * 100}%"></i></div>
-   <section class="card mt taskbox" style="--scale:${R.scale}">
+  const hc = R.compare ? !!R.hc : !!Store.get('contrast', false);
+  return `${R.compare ? '' : `<div class="row stuhead"><b class="pcount">${R.idx + 1}/${n} тапсырма</b><span class="spacer"></span><span class="ptopic">${esc(asg.subject || '')}${asg.subject ? ' · ' : ''}${esc(asg.topic)}</span></div>
+   <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${R.idx + (P.solved ? 1 : 0)}" aria-label="Прогресс"><i style="width:${((R.idx + (P.solved ? 1 : 0)) / n) * 100}%"></i></div>`}
+   <section class="card ${R.compare ? '' : 'mt'} taskbox" style="--scale:${R.scale}">
      <div class="tools" role="toolbar" aria-label="Қолжетімділік құралдары">
        <div class="fontctl" role="group" aria-label="Әріп өлшемі"><button class="fbtn" id="aMinus" aria-label="Әріпті кішірейту" title="Әріпті кішірейту">А−</button><span class="flabel">Әріп өлшемі</span><button class="fbtn" id="aPlus" aria-label="Әріпті үлкейту" title="Әріпті үлкейту">А+</button></div>
-       <button class="btn listen hcbtn" id="hcBtn" aria-pressed="${hc}">${icon('contrast')}<span>Контраст${hc ? ': қосулы' : ''}</span></button>
+       <button class="btn listen" id="hcBtn" aria-pressed="${hc}">${icon('contrast')}<span>Контраст${hc ? ': қосулы' : ''}</span></button>
        ${S.tts ? `<button class="btn listen" id="speak">${icon('speaker')}Мәтінді тыңдау</button>` : ''}
      </div>
      <div id="ttsMsg"></div>
@@ -747,20 +931,24 @@ function renderTask() {
      <div class="instr">${esc(it.instruction)}</div>
      ${it.explain ? `<div class="explain">${esc(it.explain)}</div>` : ''}
      ${it.passage ? `<div class="passage" aria-label="Мәтін">${esc(it.passage)}</div>` : ''}
-     ${it.type !== 'calc' ? `<p class="qtext">${esc(it.question)}</p>` : ''}
+     ${it.type !== 'calc' ? `<p class="qtext">${esc(it.question)}</p>` : `<p style="text-align:center;font-weight:700;margin-top:14px" class="instr">${esc(it.question)}</p>`}
      ${S.extraTime ? '<p class="muted small" style="text-align:center">⏳ Асықпа, уақыт шектелмейді.</p>' : ''}
-     <div id="hints">${it.hints.slice(0, P.hints).map((h, i) => `<div class="hint"><small>${i + 1}-қадам</small>${esc(h)}</div>`).join('')}</div>
-     <div class="row mt" style="justify-content:center">
-       ${it.hints.length ? `<button class="btn soft" id="nextHint" ${P.hints >= it.hints.length ? 'disabled' : ''}>${icon('bulb')}${P.hints ? 'Келесі қадам' : 'Қадамдық түсіндірме'}</button>` : ''}
-       ${it.visual ? `<button class="btn soft" id="visBtn">${icon('grid')}Көрнекі көмек</button>` : ''}
-     </div>
-     <div id="vis"></div>
-     ${it.type === 'calc' ? `<p style="text-align:center;font-weight:700;margin-top:18px" class="instr">${esc(it.question)}</p>` : ''}
      ${answerArea(it, P)}
-     <div id="fb">${P.solved ? (P.pending ? fbHtml('pending') : fbHtml('ok')) : ''}</div>
+     <div id="fb">${P.solved ? fbHtml(P.pending ? 'pending' : 'ok') : ''}</div>
+     <div class="helprow">${helpBtnHtml(it, P)}${it.visual ? `<button class="btn soft lg" id="visBtn">${icon('grid')}Көрнекі көмек</button>` : ''}</div>
+     <div id="hints" aria-live="polite">${it.hints.slice(0, P.hints).map((h, i) => `<div class="hint"><small>${i + 1}-көмек</small>${esc(h)}</div>`).join('')}</div>
+     <div id="vis"></div>
      <div class="row mt" style="justify-content:center" id="navRow">${navButtons()}</div>
-   </section>`, R.preview ? null : '/s/home');
-  bindTask(hasRec);
+   </section>`;
+}
+function renderTask() {
+  stopSpeech();
+  const R = state.run;
+  if (R.compare) { const host = $('#cmpRight'); if (!host) return; host.innerHTML = taskSectionHtml(); host.classList.toggle('hc', !!R.hc); bindTask(); if (R.visOpen) showVisual(true); return; }
+  document.body.classList.toggle('hc', !!Store.get('contrast', false));
+  $('#app').innerHTML = studentShell(taskSectionHtml(), R.preview ? null : '/s/home');
+  bindTask();
+  const it = R.asg.items[R.idx], P = R.per[R.idx];
   if (!P.solved && (it.type === 'calc' || it.type === 'short' || it.type === 'text')) setTimeout(() => $('#ans')?.focus({ preventScroll: true }), 50);
   if (R.visOpen) showVisual(true);
 }
@@ -772,39 +960,32 @@ function fbHtml(kind, extra = '') {
 }
 function navButtons() {
   const R = state.run, P = R.per[R.idx], n = R.asg.items.length;
+  if (R.compare) return P.solved || P.attempts || P.hints ? `<button class="btn ghost" id="resetTask">↻ Тапсырманы қайта бастау</button>` : '';
   if (P.solved) return R.idx < n - 1 ? `<button class="btn lg blue" id="nextTask">Келесі тапсырма${icon('right')}</button>` : `<button class="btn lg blue" id="finish">${icon('star')}Аяқтау</button>`;
   if (P.attempts >= 3) return R.idx < n - 1 ? '<button class="btn ghost" id="skipTask">Бұл тапсырманы кейін мұғаліммен бірге орындау · келесіге өту</button>' : '<button class="btn ghost" id="finish">Аяқтау</button>';
   return '';
 }
-function bindTask(hasRec) {
+function bindTask() {
   const R = state.run, it = R.asg.items[R.idx], P = R.per[R.idx];
-  const setScale = v => { R.scale = Math.max(0.8, Math.min(2.2, Math.round(v * 100) / 100)); $('.taskbox').style.setProperty('--scale', R.scale); useTool('Әріп өлшемі'); };
+  const box = $('.taskbox');
+  const setScale = v => { R.scale = Math.max(0.8, Math.min(2.2, Math.round(v * 100) / 100)); box.style.setProperty('--scale', R.scale); useTool('Әріп өлшемі'); };
   $('#aPlus').onclick = () => setScale(R.scale + 0.15);
   $('#aMinus').onclick = () => setScale(R.scale - 0.15);
-  $('#hcBtn').onclick = () => { const v = !Store.get('contrast', false); Store.set('contrast', v); document.body.classList.toggle('hc', v); const b = $('#hcBtn'); b.setAttribute('aria-pressed', v); b.querySelector('span').textContent = 'Контраст' + (v ? ': қосулы' : ''); useTool('Контраст'); };
-  $('#speak') && ($('#speak').onclick = () => {
-    useTool('Мәтінді тыңдау'); const box = $('#ttsMsg'); const rec = (window.QJ_AUDIO || {})[it.id];
-    if (rec && hasRec) {
-      if (TTS.api) speechSynthesis.cancel(); if (window.__qjAudio) window.__qjAudio.pause();
-      const au = new Audio(rec); window.__qjAudio = au;
-      au.onplaying = () => { box.innerHTML = '<div class="note g small">🔊 Жазылған дауыс ойнатылып жатыр (интернетсіз)</div>'; };
-      au.onended = () => { box.innerHTML = ''; };
-      au.onerror = () => { box.innerHTML = '<div class="note w small">Жазылған дауысты ойнату мүмкін болмады. Компьютердің дыбысын тексеріңіз.</div>'; };
-      au.play().catch(() => { box.innerHTML = '<div class="note w small">Жазылған дауысты ойнату мүмкін болмады. Батырманы қайта басыңыз.</div>'; });
-      return;
-    }
-    const err = TTS.speak(itemSpeech(it, P), (st, code) => { if (!document.body.contains(box)) return;
-      box.innerHTML = st === 'wait' ? '<div class="note small">Дауыс қосылып жатыр…</div>' : st === 'playing' ? `<div class="note g small">🔊 Оқылып жатыр (${esc(TTS.voice.name)})</div>` : st === 'end' ? ''
-        : st === 'error' ? `<div class="note w small">Дыбыстау кезінде қате шықты (${esc(code || 'белгісіз')}). Интернетті тексеріп, батырманы қайта басыңыз.</div>`
-        : '<div class="note w small">Дыбыс басталмады. Тексеріңіз: құрылғының және браузер қойындысының дыбысы қосулы ма, интернет бар ма. Содан кейін батырманы қайта басыңыз.</div>'; });
-    if (err) box.innerHTML = `<div class="note w small">${esc(err)}</div>`;
-  });
-  $('#nextHint') && ($('#nextHint').onclick = () => { useTool('Қадамдық түсіндірме'); if (P.hints < it.hints.length) { P.hints++; const i = P.hints - 1;
-    $('#hints').insertAdjacentHTML('beforeend', `<div class="hint"><small>${i + 1}-қадам</small>${esc(it.hints[i])}</div>`);
-    const b = $('#nextHint'); b.innerHTML = icon('bulb') + 'Келесі қадам'; if (P.hints >= it.hints.length) b.disabled = true; } });
-  $('#visBtn') && ($('#visBtn').onclick = () => { useTool('Көрнекі көмек'); showVisual(!R.visOpen); });
+  $('#hcBtn').onclick = () => {
+    let v; if (R.compare) { R.hc = v = !R.hc; $('#cmpRight').classList.toggle('hc', v); } else { v = !Store.get('contrast', false); Store.set('contrast', v); document.body.classList.toggle('hc', v); }
+    const b = $('#hcBtn'); b.setAttribute('aria-pressed', v); b.querySelector('span').textContent = 'Контраст' + (v ? ': қосулы' : ''); useTool('Контраст');
+  };
+  $('#speak') && ($('#speak').onclick = speakItem);
+  const showHint = () => {
+    if (P.hints >= it.hints.length) return; useTool('Көмек алу'); P.hints++; const i = P.hints - 1;
+    $('#hints').insertAdjacentHTML('beforeend', `<div class="hint"><small>${i + 1}-көмек</small>${esc(it.hints[i])}</div>`);
+    $('.helprow').innerHTML = helpBtnHtml(it, P) + (it.visual ? `<button class="btn soft lg" id="visBtn">${icon('grid')}Көрнекі көмек</button>` : '');
+    bindHelpRow(); $('#hints .hint:last-child').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  const bindHelpRow = () => { $('#helpBtn') && ($('#helpBtn').onclick = showHint); $('#visBtn') && ($('#visBtn').onclick = () => { useTool('Көрнекі көмек'); showVisual(!R.visOpen); }); };
+  bindHelpRow();
   $$('[data-ch]').forEach(b => b.onclick = () => { if (P.solved) return; P.choice = +b.dataset.ch; $$('[data-ch]').forEach(x => { const on = +x.dataset.ch === P.choice; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); }); });
-  $$('.msel').forEach(s => s.onchange = () => { P.match[+s.dataset.m] = s.value; $(`#mm${s.dataset.m}`).textContent = ''; });
+  $$('.msel').forEach(s => s.onchange = () => { P.match[+s.dataset.m] = s.value; $(`#mm${s.dataset.m}`).textContent = ''; $(`#mr${s.dataset.m}`).classList.remove('bad'); });
   $('#ansForm').onsubmit = e => {
     e.preventDefault(); if (P.solved) return;
     const ans = { value: $('#ans')?.value, rem: $('#rem')?.value, choice: P.choice, match: it.type === 'match' ? it.left.map((_, j) => P.match[j] || '') : [], text: $('#ans')?.value };
@@ -816,7 +997,7 @@ function bindTask(hasRec) {
       P.solved = true; P.correct = r.status === 'ok'; P.pending = r.status === 'pending'; P.firstTry = P.correct && P.attempts === 1;
       $$('#ansForm input, #ansForm button, #ansForm select').forEach(x => x.disabled = true);
       if (it.type === 'match') it.left.forEach((_, j) => { $(`#mm${j}`).textContent = '✓'; });
-      $('.progress>i').style.width = ((R.idx + 1) / R.asg.items.length * 100) + '%';
+      const pb = $('.progress>i'); if (pb) pb.style.width = ((R.idx + 1) / R.asg.items.length * 100) + '%';
       $('#fb').innerHTML = fbHtml(r.status);
     } else {
       let extra = '';
@@ -825,8 +1006,8 @@ function bindTask(hasRec) {
         else extra = `Жауабың дұрыс жауаптан ${r.v > it.answer ? 'үлкен' : 'кіші'}. Қайта есептеп көр.`;
       }
       if (it.type === 'match') { r.marks.forEach((ok, j) => { $(`#mm${j}`).textContent = ok ? '✓ дұрыс' : '✗ қайта таңда'; $(`#mr${j}`).classList.toggle('bad', !ok); }); extra = `${r.marks.length} жұптың ${r.right}-і дұрыс.`; }
+      if (it.hints.length && P.hints < it.hints.length) extra += (extra ? ' ' : '') + 'Төмендегі «Көмек алу» батырмасы көмектеседі.';
       $('#fb').innerHTML = fbHtml('no', extra);
-      if (it.hints.length && P.hints < it.hints.length) { $('#fb').insertAdjacentHTML('beforeend', `<div class="row mt" style="justify-content:center"><button class="btn soft sm" id="helpBtn">${icon('bulb')}Көмек алу</button></div>`); $('#helpBtn').onclick = () => $('#nextHint').click(); }
       $('#ans')?.select?.();
     }
     $('#navRow').innerHTML = navButtons(); bindNav();
@@ -839,7 +1020,9 @@ function bindNav() {
   $('#nextTask') && ($('#nextTask').onclick = nextT);
   $('#skipTask') && ($('#skipTask').onclick = nextT);
   $('#finish') && ($('#finish').onclick = finishRun);
+  $('#resetTask') && ($('#resetTask').onclick = () => { R.per[R.idx] = { attempts: 0, hints: 0, correct: false, firstTry: false, visual: false, solved: false, pending: false, answer: '', choice: null, match: [] }; R.visOpen = false; renderTask(); });
 }
+
 function showVisual(open) {
   const R = state.run, it = R.asg.items[R.idx]; R.visOpen = open; const box = $('#vis');
   if (!open) { box.innerHTML = ''; return; }

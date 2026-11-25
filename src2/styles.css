@@ -288,26 +288,26 @@ button.dot.x{background:#c9d3d0;position:relative}
 button.dot.x::after{content:"✕";color:#7a1f17;font-weight:800;position:absolute;inset:0;display:grid;place-items:center;font-size:16px}
 .plus{font-size:26px;font-weight:800;align-self:center;padding:0 6px}
 /* Контраст режимі */
-body.hc{background:#000;color:#fff}
-body.hc .top{background:#000;border-color:#fff}
-body.hc .logo,body.hc .stu .muted,body.hc .stu .small,body.hc .ptopic{color:#fff}
-body.hc .card,body.hc .taskbox{background:#000;border:2px solid #fff;box-shadow:none}
-body.hc .expr,body.hc .instr,body.hc .qtext,body.hc .pcount,body.hc h1,body.hc h2{color:#ffeb3b}
-body.hc .explain,body.hc .passage,body.hc .vistext,body.hc .hint,body.hc .note{background:#000;color:#fff;border:2px solid #ffeb3b}
-body.hc .btn,body.hc .fbtn,body.hc .choice,body.hc .mrow,body.hc .inp,body.hc .answer input{background:#000;color:#fff;border:2px solid #fff}
-body.hc .btn:hover,body.hc .fbtn:hover,body.hc .choice:hover{background:#222}
-body.hc .choice.on{background:#003a8c;border-color:#ffeb3b}
-body.hc .choice .cl{background:#fff;color:#000}
-body.hc .fontctl{background:#000;border-color:#fff}
-body.hc .flabel{color:#fff}
-body.hc .fb.ok{background:#003d1f;color:#fff;border:2px solid #7CFC00}
-body.hc .fb.no{background:#3d2a00;color:#fff;border:2px solid #ffeb3b}
-body.hc .progress{background:#333;border-color:#fff}
-body.hc .grp{background:#000;border-color:#fff}
-body.hc .grp i,body.hc .dot.a{background:#ffeb3b}
-body.hc .stat{background:#000;color:#fff;border-color:#fff}
-body.hc .stat b{color:#ffeb3b}
-body.hc .tag{background:#fff;color:#000}
+.hc{background:#000;color:#fff}
+.hc .top{background:#000;border-color:#fff}
+.hc .logo,.hc .stu .muted,.hc .stu .small,.hc .ptopic{color:#fff}
+.hc .card,.hc .taskbox{background:#000;border:2px solid #fff;box-shadow:none}
+.hc .expr,.hc .instr,.hc .qtext,.hc .pcount,.hc h1,.hc h2{color:#ffeb3b}
+.hc .explain,.hc .passage,.hc .vistext,.hc .hint,.hc .note{background:#000;color:#fff;border:2px solid #ffeb3b}
+.hc .btn,.hc .fbtn,.hc .choice,.hc .mrow,.hc .inp,.hc .answer input{background:#000;color:#fff;border:2px solid #fff}
+.hc .btn:hover,.hc .fbtn:hover,.hc .choice:hover{background:#222}
+.hc .choice.on{background:#003a8c;border-color:#ffeb3b}
+.hc .choice .cl{background:#fff;color:#000}
+.hc .fontctl{background:#000;border-color:#fff}
+.hc .flabel{color:#fff}
+.hc .fb.ok{background:#003d1f;color:#fff;border:2px solid #7CFC00}
+.hc .fb.no{background:#3d2a00;color:#fff;border:2px solid #ffeb3b}
+.hc .progress{background:#333;border-color:#fff}
+.hc .grp{background:#000;border-color:#fff}
+.hc .grp i,.hc .dot.a{background:#ffeb3b}
+.hc .stat{background:#000;color:#fff;border-color:#fff}
+.hc .stat b{color:#ffeb3b}
+.hc .tag{background:#fff;color:#000}
 /* Гид */
 .tour{position:fixed;right:16px;bottom:16px;z-index:60;width:360px;max-width:calc(100vw - 24px);background:#fff;border:2px solid var(--green);border-radius:18px;box-shadow:0 12px 32px rgba(21,48,42,.22);color:var(--ink)}
 .tour-h{display:flex;align-items:center}
@@ -320,9 +320,86 @@ body.hc .tag{background:#fff;color:#000}
 .tour-list{margin:12px 0 6px;padding-left:20px;font-size:13.5px;color:var(--muted)}
 .tour-list li.d{color:var(--green-d)} .tour-list li.c{color:var(--ink);font-weight:700}
 @media(max-width:560px){.tour{right:8px;left:8px;bottom:8px;width:auto}}
-body.hc .tour{background:#000;color:#fff;border-color:#ffeb3b}
+.hc .tour{background:#000;color:#fff;border-color:#ffeb3b}
 @media print{.tour,.pvbar{display:none!important}}
 body.tour-on main,body.tour-on .foot2{padding-bottom:230px}
 .tour-all summary{font-size:13.5px;margin-top:8px}
 .tour-b{max-height:46vh}
 .feat>.card,.grid2>.card{margin-top:0}
+
+/* ===================== 2.1 ===================== */
+/* Мұғалім кабинетінің оқылуы */
+#tmain{font-size:17px}
+#tmain .small{font-size:15px}
+#tmain .muted{color:#4b605b}
+#tmain h1{font-size:32px}
+.wrap{max-width:1200px}
+.nav{flex-wrap:wrap;overflow:visible}
+.nav button{font-size:15.5px}
+/* Әрекет карточкасы: бекіту және жіберу */
+.actcard{border:2px solid #b9d9f3;background:#f6faff}
+.actcard.ok{border-color:#9fd8bd;background:#f3fbf7}
+.act-st{display:flex;flex-direction:column;gap:2px;min-width:220px}
+.act-st b{font-size:19px}
+.sendstat{margin-top:12px;padding-top:10px;border-top:1px dashed #b7d7c8;font-size:15px;color:var(--green-d)}
+/* Жіберу терезесі */
+.dlg-ov{position:fixed;inset:0;background:rgba(10,30,25,.45);z-index:90;display:grid;place-items:center;padding:16px;overflow:auto}
+.dlg{background:#fff;border-radius:20px;max-width:860px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:calc(100vh - 32px);overflow:auto}
+.sendchoice{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;border:2px solid var(--line);border-radius:16px;padding:18px;background:#fbfdfc;cursor:pointer;min-height:44px;color:var(--ink)}
+.sendchoice:hover,.sendchoice:focus-visible{border-color:var(--green);background:var(--green-s)}
+.sendchoice svg{width:30px;height:30px;color:var(--green)}
+.sendchoice b{font-size:19px}
+.sendchoice span{font-size:15px;color:#4b605b}
+.linkres{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start;border-top:1px solid var(--line);padding-top:16px}
+.qrbox{text-align:center}
+.qrbox svg{max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px;image-rendering:pixelated}
+@media(max-width:640px){.linkres{grid-template-columns:1fr}}
+/* Сегменттік ауыстырғыш */
+.seg{display:inline-flex;flex-wrap:wrap;border:1.5px solid var(--line);border-radius:12px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:10px 16px;font-weight:700;cursor:pointer;min-height:44px;color:var(--muted)}
+.seg button+button{border-left:1.5px solid var(--line)}
+.seg button.on{background:var(--green);color:#fff}
+.plan.diff tr.chg td{background:#f3fbf7}
+.addmark{display:inline-block;margin-top:8px;background:var(--green);color:#fff;font-weight:800;border-radius:8px;padding:2px 10px;font-size:14px}
+.diffgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.diffgrid{grid-template-columns:1fr}}
+/* Дауыс жазу жолы */
+.recrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding:8px 10px;border:1px dashed #b9d9f3;border-radius:12px;background:#f8fbff;font-size:15px}
+.recrow>svg{width:18px;height:18px;color:var(--blue)}
+/* Дейін / кейін */
+.cmptabs{gap:8px}
+.ba{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:18px;align-items:start}
+@media(max-width:900px){.ba{grid-template-columns:1fr}}
+.ba-col{border-radius:18px;padding:16px}
+.ba-col h2{margin:0 0 10px;font-size:22px}
+.ba-col.before{background:#f4f4f2;border:2px solid #d6d6cf}
+.ba-col.before h2{color:#5a5a52}
+.ba-col.after{background:#eef8f3;border:2px solid #9fd8bd}
+.ba-col.after h2{color:var(--green-d)}
+.sheet{background:#fff;border:1px solid #d9d9d2;border-radius:6px;padding:18px 20px;font-family:"Times New Roman",Georgia,serif;font-size:15px;line-height:1.5;color:#222;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.sh-h{font-family:"Segoe UI",system-ui,sans-serif;font-size:12px;color:#777;text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+.sh-i{font-weight:700;margin:0 0 6px}
+.sh-x{font-size:18px;margin:4px 0}
+.sh-t{text-align:justify}
+.sh-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sh-cols ol{margin:0;padding-left:22px}
+.ba-list{margin:12px 0 0;padding-left:20px;color:#5a5a52;font-size:15px}
+.stu-frame{border-radius:16px}
+.stu-frame .taskbox{margin:0}
+.goalnote{font-size:17px}
+/* Оқушы: көмек батырмасы */
+.helprow{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}
+.btn.help{background:#fff6d6;color:#6b4200;border:2px solid #f0cf6a}
+.btn.help:hover{background:#ffefbf}
+.btn.help[disabled]{opacity:.6}
+.hcnt{background:#6b4200;color:#fff;border-radius:999px;padding:1px 9px;font-size:14px;margin-left:4px}
+.player{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0 4px}
+.stats.six{grid-template-columns:repeat(3,1fr)}
+@media(max-width:560px){.stats,.stats.six{grid-template-columns:1fr 1fr}}
+.hc .btn.help{background:#000;color:#ffeb3b;border-color:#ffeb3b}
+.hc .hcnt{background:#ffeb3b;color:#000}
+.hc .sheet{background:#fff;color:#000}
+@media(min-width:901px){.ba-col.before{position:sticky;top:150px}}
+.hc .btn.listen,.hc .btn.soft,.hc .btn.help,.hc .fbtn{background:#000;color:#fff;border:2px solid #fff}
+.hc .btn.help{color:#ffeb3b;border-color:#ffeb3b}
+.hc .ttype{color:#8fd3ff}
